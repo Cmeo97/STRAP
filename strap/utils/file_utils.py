@@ -60,6 +60,7 @@ class DatasetConfig:
     initalize_save_file_metadata: tp.Callable = None
 
     embedding_extension: str = "embeds.hdf5"
+    embedding_subfolder: str = None  # Optional subfolder name for embeddings (e.g., "DINOv2", "DINOv3")
     exclude_path: tp.List[str] = field(default_factory=list)
 
     def __post_init__(self):
@@ -76,11 +77,22 @@ class DatasetConfig:
                     continue
                 self.dataset_paths.append(str(path))
 
-        # replace the part after the last . with the embedding extension
-        self.embedding_paths = [
-            str(path).rsplit(".", 1)[0] + "_" + self.embedding_extension
-            for path in self.dataset_paths
-        ]
+        # Generate embedding paths - optionally in a subfolder
+        self.embedding_paths = []
+        for path in self.dataset_paths:
+            path_obj = Path(path)
+            base_name = path_obj.stem  # filename without extension
+            parent_dir = path_obj.parent
+
+            if self.embedding_subfolder:
+                # Save in subfolder: parent_dir/embedding_subfolder/filename_embeds.hdf5
+                embedding_dir = parent_dir / self.embedding_subfolder
+                embedding_path = embedding_dir / f"{base_name}_{self.embedding_extension}"
+            else:
+                # Save in same directory: parent_dir/filename_embeds.hdf5
+                embedding_path = parent_dir / f"{base_name}_{self.embedding_extension}"
+
+            self.embedding_paths.append(str(embedding_path))
 
     def filter_(self, regex_to_match: tp.List[str]):
         """
@@ -124,6 +136,11 @@ class DatasetFilePointer:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def __post_init__(self):
+        # Ensure the directory exists
+        save_dir = os.path.dirname(self.save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir, exist_ok=True)
+
         is_file = os.path.isfile(self.save_path)
 
         if not is_file:

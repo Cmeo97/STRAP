@@ -161,3 +161,55 @@ class DINOv2(BaseEncoder):
             features = features[:, self.token_idx]
 
         return features
+
+
+class DINOv3(BaseEncoder):
+
+    def __init__(
+        self,
+        model_class="facebook/dinov3-vitb16-pretrain-lvd1689m",
+        pooling=None,  # [None | "avg" | "max"]
+        token_idx=None,  # [None, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        device="cuda",
+    ):
+
+        # init model
+        from transformers import AutoModel, AutoImageProcessor
+
+        self.model = AutoModel.from_pretrained(model_class)
+        self.model.eval()
+        self.model.to(device)
+        self.processor = AutoImageProcessor.from_pretrained(model_class)
+
+        # model args
+        self.embedding_file_key = "DINOv3"
+        self.pooling = pooling
+        self.token_idx = token_idx
+        self.device = device
+
+        super().__init__()
+
+    def preprocess(self, imgs, actions=None):
+
+        inputs = self.processor(images=imgs, return_tensors="pt")
+
+        return inputs["pixel_values"].to(self.device)
+
+    def encode(self, postprocessed_imgs):
+
+        outputs = self.model(pixel_values=postprocessed_imgs, output_hidden_states=True)
+
+        features = outputs.last_hidden_state
+
+        if self.pooling is not None:
+            if self.pooling == "avg":
+                features = torch.mean(features, dim=1)
+            elif self.pooling == "max":
+                features = torch.max(features, dim=1).values
+
+        elif self.token_idx is not None:
+            # [cls] token of last layer -> self.token_idx = 0
+            # DINOv3 outputs: 1 class token + 4 register tokens + 196 patch tokens = 201 tokens for 224x224 images
+            features = features[:, self.token_idx]
+
+        return features

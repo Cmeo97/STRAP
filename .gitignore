@@ -7,7 +7,7 @@
 
 ### Linux ###
 *~
-
+*.png
 # temporary files which can be created if a process still has a handle open of a deleted file
 .fuse_hidden*
 
@@ -43,6 +43,11 @@ parts/
 sdist/
 var/
 wheels/
+logs/
+data/
+legacy/
+.cursor/
+.claude/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
