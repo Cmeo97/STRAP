@@ -31,7 +31,7 @@ def explore_file_structure(file_path: str):
                 if obj.attrs: print(f"      Attributes: {dict(obj.attrs)}")
         
         print("\nFile structure:")
-        f.visititems(print_structure)
+        #f.visititems(print_structure)
         
         # Get demo keys
         if "data" in f:
@@ -220,19 +220,21 @@ def create_summary_statistics(file_path: str):
 
         trajectory_lengths = []
         language_instructions = []
-        for subkey in grp_keys:
-            if subkey == 'target_data':
-                continue
-            match = data[subkey]
-            if "robot_states" in match:
-                trajectory_lengths.append(len(match["robot_states"]))
-            
-            if "ep_meta" in match.attrs:
-                try:
-                    lang = json.loads(match.attrs["ep_meta"]).get("lang", "N/A")
-                    language_instructions.append(lang)
-                except:
-                    pass
+        for grp_key in grp_keys:
+            subtrajec = data[grp_key]
+            for subkey in subtrajec.keys():
+                if subkey == 'target_data':
+                    continue
+                match = subtrajec[subkey]
+                if "robot_states" in match:
+                    trajectory_lengths.append(len(match["robot_states"]))
+                
+                if "ep_meta" in match.attrs:
+                    try:
+                        lang = json.loads(match.attrs["ep_meta"]).get("lang", "N/A")
+                        language_instructions.append(lang)
+                    except:
+                        pass
 
         print(f"   Ground truth demos: {len(grp_keys)}")
         print(f"   Retrieved demos: {len(trajectory_lengths)}")

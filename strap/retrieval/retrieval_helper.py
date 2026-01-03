@@ -131,7 +131,7 @@ def get_all_matches(
         total=total_matches, disable=not args.verbose, desc="Finding Matches"
     ) as pbar:
         result_nested_list = [[] for _ in range(len(task_embeddings))]
-        for i in range(2):
+        for i in range(len(args.offline_dataset)):
             file_path, embedding_path = (
                 args.offline_dataset.dataset_paths[i],
                 args.offline_dataset.embedding_paths[i],
