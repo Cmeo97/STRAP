@@ -3,7 +3,7 @@ from strap.utils.retrieval_utils import RetrievalArgs
 from strap.utils.constants import REPO_ROOT
 from copy import deepcopy
 from dataclasses import replace
-from strap.retrieval.retrieval_helper import run_retrieval, save_results
+from strap.retrieval.retrieval_helper import run_retrieval, save_results, save_results_update
 import numpy as np
 import random
 import argparse
@@ -44,7 +44,7 @@ def get_args(model: str = "dinov2"):
         output_path=output_path,
         model_key=model_key,
         image_keys="obs/agentview_rgb",
-        num_demos=5,
+        num_demos=2,
         frame_stack=5,
         action_chunk=5,
         top_k=100,
@@ -55,8 +55,8 @@ def get_args(model: str = "dinov2"):
 
 
 def main(args: RetrievalArgs):
-    full_task_trajectory_results, retrieval_results = run_retrieval(args)
-    save_results(args, full_task_trajectory_results, retrieval_results)
+    target_subtrajectories, retrieval_results = run_retrieval(args)
+    save_results_update(args, target_subtrajectories, retrieval_results)
 
 
 if __name__ == "__main__":
@@ -64,9 +64,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="dinov2",
+        default="dinov3",
         choices=["dinov2", "dinov3"],
-        help="Model to use for retrieval (default: dinov2)"
+        help="Model to use for retrieval (default: dinov3)"
     )
     
     parsed_args = parser.parse_args()

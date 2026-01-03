@@ -1,10 +1,12 @@
 import os
+import json
 import typing as tp
 from itertools import accumulate
 
 import h5py
 from tqdm.auto import tqdm
 import numpy as np
+from strap.configs.libero_file_functions import get_libero_lang_instruction
 from strap.utils.file_utils import get_demo_grp
 from strap.utils.processing_utils import flatten_2d_array
 from strap.utils.retrieval_utils import (
@@ -65,16 +67,16 @@ def run_retrieval(
         )
         for task_embedding in task_embeddings
     ]
-    task_embeddings = slice_embeddings(args, task_embeddings)
+    task_embeddings, target_subtrajectories = slice_embeddings(args, task_embeddings)
     nested_match_list = get_all_matches(args, task_embeddings)
     nested_match_list = process_matches(args, nested_match_list)
-    return original_demo_trajectories, nested_match_list
-
+    return target_subtrajectories, nested_match_list
 
 def slice_embeddings(
     args: RetrievalArgs, task_embeddings: tp.List[TrajectoryEmbedding]
 ):
     new_task_embeddings = []
+    reference_subtrajectories = []
     for task_embedding in task_embeddings:
         # segment using state derivative heuristic
         segments = segment_trajectory_by_derivative(
@@ -98,9 +100,16 @@ def slice_embeddings(
                     file_img_keys=task_embedding.file_img_keys,
                 )
             )
+            reference_subtrajectories.append(
+                {
+                    "file_path": task_embedding.file_path,
+                    "file_traj_key": task_embedding.file_traj_key,
+                    "start": seg_idcs[i],
+                    "end": seg_idcs[i + 1],
+                }
+            )
     del task_embeddings
-    return new_task_embeddings
-
+    return new_task_embeddings, reference_subtrajectories
 
 def get_all_matches(
     args: RetrievalArgs, task_embeddings: tp.List[TrajectoryEmbedding]
@@ -122,7 +131,7 @@ def get_all_matches(
         total=total_matches, disable=not args.verbose, desc="Finding Matches"
     ) as pbar:
         result_nested_list = [[] for _ in range(len(task_embeddings))]
-        for i in range(len(args.offline_dataset)):
+        for i in range(2):
             file_path, embedding_path = (
                 args.offline_dataset.dataset_paths[i],
                 args.offline_dataset.embedding_paths[i],
@@ -247,3 +256,114 @@ def save_results(
         mask_grp.create_dataset("retrieved", data=np.array(retrieved_keys, dtype="S"))
 
         print(f"Output file saved at {args.output_path}")
+
+
+def save_results_update(
+    args: RetrievalArgs,
+    target_subtrajectories: tp.List[tp.Dict[str, tp.Union[str, int]]],
+    nested_match_list: tp.List[tp.List[TrajectoryMatchResult]],
+) -> None:
+
+    if os.path.isfile(args.output_path):
+        print(f"Output file already exists, overwriting...")
+    # make the output location if it doesn't exist
+    if not os.path.exists(os.path.dirname(args.output_path)):
+        os.makedirs(os.path.dirname(args.output_path))
+
+    with h5py.File(args.output_path, "w") as f:
+        args.task_dataset.initalize_save_file_metadata(f, args.task_dataset)
+
+        if args.task_dataset.file_structure.demo_group is not None:
+            if args.task_dataset.file_structure.demo_group not in f:
+                demo_grp = f.create_group(args.task_dataset.file_structure.demo_group)
+            else:
+                demo_grp = f[args.task_dataset.file_structure.demo_group]
+        else:
+            demo_grp = f
+
+        for i, subtrajectory in enumerate(target_subtrajectories):
+            ref_demo_key = f"subtrajectory_{i}"
+            episode_grp = demo_grp.create_group(ref_demo_key)
+            
+            td_grp = episode_grp.create_group("target_data")
+            td_grp.attrs["file_path"] = subtrajectory["file_path"]
+            td_grp.attrs["file_traj_key"] = subtrajectory["file_traj_key"]
+            with h5py.File(
+                subtrajectory["file_path"], "r", swmr=True
+            ) as data_file:
+                data_grp = data_file['data'][subtrajectory["file_traj_key"]]
+                start = subtrajectory["start"]
+                end = subtrajectory["end"]
+                td_grp.create_dataset(
+                    "actions", data=np.array(data_grp["actions"][start:end])
+                )
+                td_grp.create_dataset(
+                    "robot_states", data=np.array(data_grp["robot_states"][start:end])
+                )
+                td_grp.create_group("obs")
+                for obs_key in data_grp["obs"].keys():
+                    td_grp["obs"].create_dataset(
+                        obs_key, data=np.array(data_grp["obs"][obs_key][start:end])
+                    )
+                language_instruction = get_libero_lang_instruction(data_file, subtrajectory["file_traj_key"])
+                td_grp.attrs['ep_meta'] = json.dumps({
+                    "lang": language_instruction
+                })
+            for j, match in enumerate(nested_match_list[i]):
+                demo_key = f"match_{j}"
+                match_grp = episode_grp.create_group(demo_key)
+                match_grp.attrs["file_path"] = match.file_path
+                match_grp.attrs["file_traj_key"] = match.file_traj_key
+                with h5py.File(
+                    match.file_path, "r", swmr=True
+                ) as data_file:
+                    data_grp = data_file['data'][match.file_traj_key]
+                    max_length = data_grp['actions'].shape[0]
+                    extra_start = max(
+                        0, 0 - match.start + args.frame_stack - 1
+                    )  # we want to pad by 4 if the frame stack is 5
+                    extra_end = max(0, match.end - max_length + args.action_chunk - 1)
+
+                    start_idx = max(0, match.start - args.frame_stack)
+                    end_idx = min(match.end + args.action_chunk, max_length)
+
+                    for lk in ["actions", "robot_states"]:
+                        tmp_copy = np.array(data_grp[lk][start_idx:end_idx]).copy()
+                        # pad the start if needed
+                        if extra_start:
+                            tmp_copy = np.concatenate(
+                                [np.stack([tmp_copy[0] for i in range(extra_start)], axis=0), tmp_copy],
+                                axis=0,
+                            )
+                        # pad the end if needed
+                        if extra_end:
+                            tmp_copy = np.concatenate(
+                                [tmp_copy, np.stack([tmp_copy[-1] for i in range(extra_end)], axis=0)],
+                                axis=0,
+                            )
+
+                        match_grp[lk] = tmp_copy
+
+                    match_grp.create_group("obs")
+                    for obs_key in data_grp["obs"].keys():                        
+                        tmp_copy = np.array(data_grp["obs"][obs_key][start_idx:end_idx]).copy()
+                        # pad the start if needed
+                        if extra_start:
+                            tmp_copy = np.concatenate(
+                                [np.stack([tmp_copy[0] for i in range(extra_start)], axis=0), tmp_copy],
+                                axis=0,
+                            )
+                        # pad the end if needed
+                        if extra_end:
+                            tmp_copy = np.concatenate(
+                                [tmp_copy, np.stack([tmp_copy[-1] for i in range(extra_end)], axis=0)],
+                                axis=0,
+                            )
+                        match_grp["obs"][obs_key] = tmp_copy
+                    language_instruction = get_libero_lang_instruction(data_file, match.file_traj_key)
+                    match_grp.attrs['ep_meta'] = json.dumps({
+                        "lang": language_instruction
+                    })
+            
+    print(f"Output file saved at {args.output_path}")
+

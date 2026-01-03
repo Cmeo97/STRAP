@@ -25,12 +25,10 @@ def explore_file_structure(file_path: str):
         def print_structure(name, obj):
             if isinstance(obj, h5py.Group):
                 print(f"\n📁 Group: {name}")
-                if obj.attrs:
-                    print(f"   Attributes: {dict(obj.attrs)}")
+                if obj.attrs: print(f"   Attributes: {dict(obj.attrs)}")
             elif isinstance(obj, h5py.Dataset):
                 print(f"   📊 Dataset: {name}, shape: {obj.shape}, dtype: {obj.dtype}")
-                if obj.attrs:
-                    print(f"      Attributes: {dict(obj.attrs)}")
+                if obj.attrs: print(f"      Attributes: {dict(obj.attrs)}")
         
         print("\nFile structure:")
         f.visititems(print_structure)
@@ -58,6 +56,7 @@ def get_demo_info(file_path: str, demo_key: str) -> Dict[str, Any]:
     
     with h5py.File(file_path, "r") as f:
         demo_group = f["data"]
+        demo_key = f"{demo_key}/match_0"  # Assuming we want info about the first match
         demo = demo_group[demo_key]
         
         info["demo_key"] = demo_key
@@ -90,12 +89,14 @@ def visualize_trajectory(
     demo_key: str,
     max_images: int = 20,
     save_path: str = None,
-    show_images: bool = True
+    show_images: bool = True,
+    flip_images: bool = False
 ):
     """Visualize a single trajectory with images, actions, and states."""
     
     with h5py.File(file_path, "r") as f:
         demo_group = f["data"]
+        demo_key = f"{demo_key}/match_0"  # Visualize the first match
         demo = demo_group[demo_key]
         
         # Get language instruction
@@ -155,9 +156,10 @@ def visualize_trajectory(
         )
         
         # Plot images
-        for i in range(num_images):
-            row = i // cols
-            col = i % cols
+        k = 0
+        for i in range(0, images.shape[0], int(images.shape[0] / num_images)):
+            row = k // cols
+            col = k % cols
             ax = fig.add_subplot(gs[row, col])
             
             if images is not None:
@@ -165,9 +167,14 @@ def visualize_trajectory(
                 # Ensure image is in correct format
                 if img.max() > 1.0:
                     img = img / 255.0
+                if flip_images:
+                    img = np.flip(img, axis=0)
                 ax.imshow(img)
                 ax.set_title(f"Frame {i}", fontsize=8)
             ax.axis("off")
+            k += 1
+            if k >= num_images:
+                break
         
         # Plot actions
         if actions is not None:
@@ -206,53 +213,32 @@ def create_summary_statistics(file_path: str):
     print("\n" + "=" * 80)
     print("Summary Statistics")
     print("=" * 80)
-    
+        
     with h5py.File(file_path, "r") as f:
-        demo_group = f["data"]
-        demo_keys = list(demo_group.keys())
-        
-        # Get mask information
-        retrieved_keys = []
-        gt_keys = []
-        if "mask" in f:
-            mask_group = f["mask"]
-            if "retrieved" in mask_group:
-                retrieved_data = np.array(mask_group["retrieved"])
-                if retrieved_data.dtype == 'S':
-                    retrieved_keys = [s.decode('utf-8') for s in retrieved_data]
-                else:
-                    retrieved_keys = list(retrieved_data)
-            
-            if "all" in mask_group:
-                all_data = np.array(mask_group["all"])
-                if all_data.dtype == 'S':
-                    all_keys = [s.decode('utf-8') for s in all_data]
-                else:
-                    all_keys = list(all_data)
-                gt_keys = [k for k in all_keys if k not in retrieved_keys]
-        
-        print(f"\n📊 Total demos: {len(demo_keys)}")
-        print(f"   Retrieved demos: {len(retrieved_keys)}")
-        print(f"   Ground truth demos: {len(gt_keys)}")
-        
-        # Analyze trajectory lengths
+        data = f["data"]
+        grp_keys = list(data.keys())
+
         trajectory_lengths = []
         language_instructions = []
-        
-        for demo_key in demo_keys:
-            demo = demo_group[demo_key]
-            if "actions" in demo:
-                trajectory_lengths.append(len(demo["actions"]))
+        for subkey in grp_keys:
+            if subkey == 'target_data':
+                continue
+            match = data[subkey]
+            if "robot_states" in match:
+                trajectory_lengths.append(len(match["robot_states"]))
             
-            if "ep_meta" in demo.attrs:
+            if "ep_meta" in match.attrs:
                 try:
-                    lang = json.loads(demo.attrs["ep_meta"]).get("lang", "N/A")
+                    lang = json.loads(match.attrs["ep_meta"]).get("lang", "N/A")
                     language_instructions.append(lang)
                 except:
                     pass
-        
+
+        print(f"   Ground truth demos: {len(grp_keys)}")
+        print(f"   Retrieved demos: {len(trajectory_lengths)}")
+
         if trajectory_lengths:
-            print(f"\n📏 Trajectory length statistics:")
+            print(f"\n📏 Retrieved trajectory length statistics:")
             print(f"   Mean: {np.mean(trajectory_lengths):.2f}")
             print(f"   Median: {np.median(trajectory_lengths):.2f}")
             print(f"   Min: {np.min(trajectory_lengths)}")
@@ -261,7 +247,7 @@ def create_summary_statistics(file_path: str):
         
         if language_instructions:
             unique_langs = set(language_instructions)
-            print(f"\n📝 Language instructions:")
+            print(f"\n📝 Retrieved language instructions:")
             print(f"   Unique instructions: {len(unique_langs)}")
             for lang in list(unique_langs)[:5]:
                 count = language_instructions.count(lang)
@@ -284,9 +270,9 @@ def create_summary_statistics(file_path: str):
             axes[0].grid(True, alpha=0.3)
             
             # Bar chart: Retrieved vs Ground Truth
-            if retrieved_keys or gt_keys:
+            if trajectory_lengths or grp_keys:
                 categories = ["Retrieved", "Ground Truth"]
-                counts = [len(retrieved_keys), len(gt_keys)]
+                counts = [len(trajectory_lengths), len(grp_keys)]
                 axes[1].bar(categories, counts, color=["skyblue", "lightcoral"], edgecolor="black")
                 axes[1].set_ylabel("Number of Demos")
                 axes[1].set_title("Retrieved vs Ground Truth Demos")
@@ -306,8 +292,9 @@ def main():
         description="Visualize retrieval results from HDF5 file"
     )
     parser.add_argument(
-        "file_path",
+        "--file_path",
         type=str,
+        default="data/retrieval_results/Dinov3/stove-pot_retrieved_dataset.hdf5",
         help="Path to the retrieval results HDF5 file"
     )
     parser.add_argument(
@@ -324,7 +311,7 @@ def main():
     parser.add_argument(
         "--max-demos",
         type=int,
-        default=5,
+        default=3,
         help="Maximum number of demos to visualize (default: 5)"
     )
     parser.add_argument(
@@ -342,12 +329,19 @@ def main():
     parser.add_argument(
         "--no-show",
         action="store_true",
+        default=True,
         help="Don't display plots (only save them)"
     )
     parser.add_argument(
         "--stats-only",
         action="store_true",
         help="Only generate statistics, skip individual visualizations"
+    )
+    parser.add_argument(
+        "--flip-images",
+        action="store_true",
+        default=True,
+        help="Flip images vertically for correct orientation (True for Libero dataset)"
     )
     
     args = parser.parse_args()
@@ -411,7 +405,8 @@ def main():
                 demo_key,
                 max_images=args.max_images,
                 save_path=save_path,
-                show_images=not args.no_show
+                show_images=not args.no_show,
+                flip_images=args.flip_images
             )
     
     print("\n✅ Visualization complete!")
