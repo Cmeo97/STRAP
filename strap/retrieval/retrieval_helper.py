@@ -282,7 +282,7 @@ def save_results_update(
             demo_grp = f
 
         for i, subtrajectory in enumerate(target_subtrajectories):
-            ref_demo_key = f"subtrajectory_{i}"
+            ref_demo_key = f"episode_{i}"
             episode_grp = demo_grp.create_group(ref_demo_key)
             
             td_grp = episode_grp.create_group("target_data")

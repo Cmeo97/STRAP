@@ -37,17 +37,7 @@ def explore_file_structure(file_path: str):
         if "data" in f:
             demo_group = f["data"]
             demo_keys = list(demo_group.keys())
-            print(f"\n📋 Found {len(demo_keys)} demos: {demo_keys[:10]}{'...' if len(demo_keys) > 10 else ''}")
-            
-            # Check mask group
-            if "mask" in f:
-                mask_group = f["mask"]
-                print("\n🎭 Mask groups:")
-                for key in mask_group.keys():
-                    mask_data = np.array(mask_group[key])
-                    if mask_data.dtype == 'S':  # String array
-                        mask_data = [s.decode('utf-8') for s in mask_data]
-                    print(f"   {key}: {len(mask_data)} items - {mask_data[:5]}{'...' if len(mask_data) > 5 else ''}")
+            print(f"\n📋 Found {len(demo_keys)} episodes: {demo_keys[:10]}{'...' if len(demo_keys) > 10 else ''}")
 
 
 def get_demo_info(file_path: str, demo_key: str) -> Dict[str, Any]:

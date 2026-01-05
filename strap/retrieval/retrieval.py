@@ -9,12 +9,12 @@ import random
 import argparse
 
 
-def get_args(model: str = "dinov2"):
+def get_args(args):
 
     from strap.configs.libero_hdf5_config import LIBERO_90_CONFIG, LIBERO_10_CONFIG
 
     # Map model argument to model_key and folder name
-    model = model.lower()
+    model = args.model.lower()
     if model == "dinov2":
         model_key = "DINOv2"
         model_folder = "Dinov2"
@@ -36,7 +36,7 @@ def get_args(model: str = "dinov2"):
     offline_dataset = replace(offline_dataset, embedding_subfolder=model_key)
 
     # Update output path to include model folder
-    output_path = f"{REPO_ROOT}/data/retrieval_results/{model_folder}/stove-pot_retrieved_dataset.hdf5"
+    output_path = f"{REPO_ROOT}/data/retrieval_results/{model_folder}/{args.output_filename}"
 
     return RetrievalArgs(
         task_dataset=task_dataset,
@@ -68,9 +68,15 @@ if __name__ == "__main__":
         choices=["dinov2", "dinov3"],
         help="Model to use for retrieval (default: dinov3)"
     )
+    parser.add_argument(
+        "--output_filename",
+        type=str,
+        default="stove-pot_retrieved_dataset.hdf5",
+        help="Optional output filename to override the default path"
+    )
     
     parsed_args = parser.parse_args()
-    args = get_args(model=parsed_args.model)
+    args = get_args(parsed_args)
 
     print(f"Using model: {args.model_key}")
     print(f"Output path: {args.output_path}")

@@ -30,6 +30,16 @@
 </p>
 <p align="center">STRAP is a retrieval method that robustifies few-shot imitation learning by encoding trajectories with vision foundation models and retrieving sub-trajectories with subsequence dynamic time warping.
 
+# Prototypical Neural Networks
+
+### Train
+Download the target dataset and libero dataset and put those in the correct directory.
+
+```bash
+python prototypical_networks/prototype_libero.py
+```
+
+
 -------
 # STRAP Sub-Trajectory Retrieval Repo
 This repository contains our implementation of the trajectory encoding and the retrieval algorithm.
