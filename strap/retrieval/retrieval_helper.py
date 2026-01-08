@@ -271,15 +271,7 @@ def save_results_update(
         os.makedirs(os.path.dirname(args.output_path))
 
     with h5py.File(args.output_path, "w") as f:
-        args.task_dataset.initalize_save_file_metadata(f, args.task_dataset)
-
-        if args.task_dataset.file_structure.demo_group is not None:
-            if args.task_dataset.file_structure.demo_group not in f:
-                demo_grp = f.create_group(args.task_dataset.file_structure.demo_group)
-            else:
-                demo_grp = f[args.task_dataset.file_structure.demo_group]
-        else:
-            demo_grp = f
+        demo_grp = f.create_group('results')
 
         for i, subtrajectory in enumerate(target_subtrajectories):
             ref_demo_key = f"episode_{i}"
@@ -287,7 +279,7 @@ def save_results_update(
             
             td_grp = episode_grp.create_group("target_data")
             td_grp.attrs["file_path"] = subtrajectory["file_path"]
-            td_grp.attrs["file_traj_key"] = subtrajectory["file_traj_key"]
+            td_grp.attrs["demo_key"] = subtrajectory["file_traj_key"]
             with h5py.File(
                 subtrajectory["file_path"], "r", swmr=True
             ) as data_file:
@@ -313,7 +305,7 @@ def save_results_update(
                 demo_key = f"match_{j}"
                 match_grp = episode_grp.create_group(demo_key)
                 match_grp.attrs["file_path"] = match.file_path
-                match_grp.attrs["file_traj_key"] = match.file_traj_key
+                match_grp.attrs["demo_key"] = match.file_traj_key
                 with h5py.File(
                     match.file_path, "r", swmr=True
                 ) as data_file:

@@ -139,7 +139,7 @@ def resize_to_mean_length(task_data_list):
     return np.stack(resized, axis=0)
 
 def create_target_data():
-    with h5py.File('data/LIBERO/target_dataset.hdf5', 'w') as f:
+    with h5py.File('data/retrieved_results/target_dataset.hdf5', 'w') as f:
         for task in target_data_dict.keys():
             task_data = {
                 'actions': [],
