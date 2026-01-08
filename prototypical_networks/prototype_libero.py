@@ -284,6 +284,7 @@ def retrieve_maneuver_dtw(prototype_seq, scene_embeddings):
         start = 0
     end = path[-1, 1]
     cost = accumulated_cost_matrix[-1, end]
+    normalized_score = cost / len(prototype_seq)
     # Note that the actual end index is inclusive in this case so +1 to use python : based indexing
     end = end + 1
     
@@ -294,7 +295,7 @@ def retrieve_maneuver_dtw(prototype_seq, scene_embeddings):
     return {
         "start_idx": int(start),
         "end_idx": int(end),
-        "score": float(cost)
+        "score": float(normalized_score)
     }
 
 def get_prototypes(encoder, reference_maneuvers):
@@ -311,7 +312,7 @@ def get_prototypes(encoder, reference_maneuvers):
         for seq_np in sequences[:K_SHOT]:
             with torch.no_grad():
                 # (L, Dim) -> (1, L, Dim)
-                seq_tensor = torch.from_numpy(seq_np).unsqueeze(0).to(device)
+                seq_tensor = torch.from_numpy(seq_np).float().unsqueeze(0).to(device)
                 # Get (1, L, Feature_Dim)
                 features = encoder(seq_tensor, return_temporal=True).squeeze(0)
                 temporal_embeddings_list.append(features)
@@ -347,7 +348,7 @@ def retrieve(encoder, prototypes, offline_data_list, class_names):
             demo_results = []
             for scene_name, scene_data in test_scenes.items():                
                 with torch.no_grad():
-                    scene_tensor = torch.from_numpy(scene_data).unsqueeze(0).to(device)
+                    scene_tensor = torch.from_numpy(scene_data).float().unsqueeze(0).to(device)
                     # Scenes are usually large, so this returns (Scene_L, Feature_Dim)
                     scene_features = encoder(scene_tensor, return_temporal=True).squeeze(0)
                 
@@ -355,7 +356,8 @@ def retrieve(encoder, prototypes, offline_data_list, class_names):
                 match = retrieve_maneuver_dtw(proto_seq.cpu().numpy(), scene_features.cpu().numpy())
                 match['scene'] = scene_name
                 match['task'] = task_name
-                if match['score'] < 250:  # Arbitrary threshold to filter bad matches
+                # TODO: Tune this threshold based on validation set or target set
+                if match['score'] < 10:  # Arbitrary threshold to filter bad matches
                     demo_results.append(match)
             # Filter overlaps
             task_results[class_id].extend(demo_results)
@@ -370,9 +372,9 @@ def retrieve(encoder, prototypes, offline_data_list, class_names):
 if __name__ == '__main__':
     # A. Simulate Data
     # 50 examples per class for robust prototype calculation
-    reference_data = "data/LIBERO/target_dataset.hdf5"
+    reference_data = "data/retrieval_results/target_dataset.hdf5"
     reference_maneuver_data, class_names = process_target_data(reference_data)
-    pretrained = False
+    pretrained = True  # Set to False to train from scratch
 
     encoder = RobustSequenceEncoder(input_dim=N_DIM, output_dim=FEATURE_SIZE)
 
@@ -384,7 +386,7 @@ if __name__ == '__main__':
         print(f"Total training time: {training_time:.2f} seconds.")
     
         # Save the trained model
-        #torch.save(encoder.state_dict(), f'prototype_libero_model_{N_DIM}.pth')
+        torch.save(encoder.state_dict(), f'prototype_libero_model_{N_DIM}.pth')
 
     else:
         # load the trained model (for inference)
@@ -400,5 +402,5 @@ if __name__ == '__main__':
     
     final_results = retrieve(encoder, prototypes, offline_data_list, class_names)
 
-    with open(f'prototype_strap_results_{N_DIM}.json', 'w') as f:
+    with open(f'prototype_results_{N_DIM}.json', 'w') as f:
         json.dump(final_results, f, indent=4)
