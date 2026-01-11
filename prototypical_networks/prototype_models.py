@@ -76,3 +76,30 @@ def robust_prototypical_loss(embeddings, n_way, k_shot, n_query):
     loss = torch.nn.functional.cross_entropy(logits, target_labels)
     
     return loss
+
+def batch_hard_triplet_loss(embeddings, labels, margin=0.3):
+    """
+    embeddings: (Batch_Size * Samples, Feature_Dim)
+    labels: (Batch_Size * Samples)
+    """
+    # 1. Compute Pairwise Distance Matrix (B*S, B*S)
+    dist_mat = torch.cdist(embeddings, embeddings)**2
+    
+    # 2. For each anchor, find the hardest positive and hardest negative
+    # Create mask for same-class (positives) and different-class (negatives)
+    labels = labels.unsqueeze(0)
+    mask_pos = (labels == labels.T).float()
+    mask_neg = (labels != labels.T).float()
+    
+    # Hardest Positive: max distance to same-class sample
+    # (Multiply by mask_pos, ignore self-distance)
+    hard_pos = (dist_mat * mask_pos).max(dim=1)[0]
+    
+    # Hardest Negative: min distance to different-class sample
+    # (Set same-class distances to infinity to find the true minimum negative)
+    hard_neg = (dist_mat + (mask_pos * 1e6)).min(dim=1)[0]
+    
+    # 3. Triplet Loss formula
+    loss = torch.clamp(hard_pos - hard_neg + margin, min=0.0)
+    
+    return loss.mean()

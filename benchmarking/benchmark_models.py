@@ -45,7 +45,7 @@ def dtaidistance_matching(query, series, top_k=None, dist_thres = None):
       ei += stride
       start_indexes.append(si)
 
-  sa = subsequence_search(query, s, max_dist=dist_thres)
+  sa = subsequence_search(query, s, max_dist=dist_thres, use_lb=False)
   best = sa.kbest_matches(k=top_k)
 
   result = [[] for _ in range(len(best))]

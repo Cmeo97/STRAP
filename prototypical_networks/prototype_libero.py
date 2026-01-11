@@ -15,7 +15,8 @@ from tqdm import tqdm
 
 from prototypical_networks.prototype_models import (
     RobustSequenceEncoder, 
-    robust_prototypical_loss
+    robust_prototypical_loss,
+    batch_hard_triplet_loss
 )
 from prototypical_networks.prototype_datasets import (
     RobustManeuverDataset, 
@@ -36,43 +37,7 @@ N_CLASSES = 9           # Number of maneuver types
 N_WAY = 5               # Number of classes per episode
 K_SHOT = 7              # Number of support examples per class
 N_QUERY = 3             # Number of query examples per class
-N_EPISODES = 500        # Total training episodes
-
-# --- Dataset ---
-
-def process_target_data(target_data_file):
-    """Simulates realistic, variable-length maneuver data."""
-    maneuvers = {}
-    class_names ={}
-    with h5py.File(target_data_file, 'r') as f:
-        for i, task in enumerate(f.keys()):
-            data = f[task]
-
-            joint_states = data['joint_states'][:]
-            gripper_states = data['gripper_states'][:]
-            ee_pos = data['ee_pos'][:]
-            all_data = np.concatenate([joint_states, gripper_states, ee_pos], axis=2)
-            # Convert to list of 2D arrays for sampling
-            maneuvers[i] = [all_data[j] for j in range(all_data.shape[0])]
-            class_names[i] = task
-
-    return maneuvers, class_names
-
-def process_offline_data(offline_data):
-    target_segments_list = {}  
-    with h5py.File(offline_data, 'r') as f:
-        data = f['data']
-        demo_list = list(data.keys())
-        maneuver = [[] for _ in range(N_CLASSES)]
-        for demo in demo_list:
-            joint_states = data[demo]['obs/joint_states'][:]
-            gripper_states = data[demo]['obs/gripper_states'][:]
-            ee_pos = data[demo]['obs/ee_pos'][:]
-            states = data[demo]['states'][:]
-            #states = reduce_features_pca(states, n_components=N_DIM)
-            all_data = np.concatenate([joint_states, gripper_states, ee_pos], axis=1)
-            target_segments_list[demo] = all_data.astype(np.float32)
-    return target_segments_list
+N_EPISODES = 300        # Total training episodes
 
 # --- Training Loop ---
 def train_robust_network(encoder, maneuver_data):
@@ -197,7 +162,7 @@ if __name__ == '__main__':
                         help='Path to the reference maneuver data HDF5 file')
     parser.add_argument('--offline_data_dir', type=str, default='data/LIBERO/libero_90/*demo.hdf5',
                         help='Path pattern to the offline data HDF5 files')
-    parser.add_argument('--pretrained', action='store_true', default=True,
+    parser.add_argument('--pretrained', action='store_true', default=False,
                         help='Use pretrained model for retrieval without training')
     
     args = parser.parse_args()
