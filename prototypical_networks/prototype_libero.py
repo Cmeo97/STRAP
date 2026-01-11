@@ -3,17 +3,29 @@ import glob
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import numpy as np
 import h5py
 import json
 from typing import List, Tuple, Dict, Any
 import random
 import time
-from strap.utils.retrieval_utils import (
-    get_distance_matrix,
-    compute_accumulated_cost_matrix_subsequence_dtw_21,
-    compute_optimal_warping_path_subsequence_dtw_21,
+import argparse
+from tqdm import tqdm
+
+from prototypical_networks.prototype_models import (
+    RobustSequenceEncoder, 
+    robust_prototypical_loss
+)
+from prototypical_networks.prototype_datasets import (
+    RobustManeuverDataset, 
+    custom_collate_fn,
+    process_offline_data,
+    process_target_data
+)
+from prototypical_networks.prototype_utils import (
+    retrieve_maneuver_dtw,
+    calibrate_dtw_thresholds
 )
 # --- Configuration Constants ---
 N_DIM = 12              # Number of features
@@ -24,85 +36,9 @@ N_CLASSES = 9           # Number of maneuver types
 N_WAY = 5               # Number of classes per episode
 K_SHOT = 7              # Number of support examples per class
 N_QUERY = 3             # Number of query examples per class
-N_EPISODES = 400        # Total training episodes
+N_EPISODES = 500        # Total training episodes
 
-# --- 1. Model Architecture ---
-class RobustSequenceEncoder(nn.Module):
-    def __init__(self, input_dim=N_DIM, output_dim=FEATURE_SIZE):
-        super().__init__()
-        self.feature_extractor = nn.Sequential(
-            nn.Conv1d(input_dim, 64, kernel_size=5, padding=2),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Conv1d(64, 128, kernel_size=5, padding=2),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Conv1d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-            nn.Conv1d(256, output_dim, kernel_size=3, padding=1),
-            nn.ReLU()
-        )
-
-    def forward(self, x, mask=None, return_temporal=False):
-        # x: (B, L, D) -> (B, D, L)
-        x = x.permute(0, 2, 1) 
-        temporal_features = self.feature_extractor(x) # (B, Out_Dim, L)
-        
-        if return_temporal:
-            return temporal_features.permute(0, 2, 1)
-        
-        # --- CRITICAL: MASKED MAX POOLING ---
-        if mask is not None:
-            # mask: (B, L) -> Reshape to (B, 1, L) to match features
-            mask = mask.unsqueeze(1) 
-            # Set padded areas to a very small number so max() ignores them
-            temporal_features = temporal_features.masked_fill(mask == 0, -1e9)
-        
-        pooled = torch.max(temporal_features, dim=2)[0] 
-        
-        # L2 Normalization (Essential for Euclidean Distance stability)
-        return torch.nn.functional.normalize(pooled, p=2, dim=1)
-
-def robust_prototypical_loss(embeddings, n_way, k_shot, n_query):
-    """
-    embeddings: (Batch_Size * Samples_Per_Episode, Feature_Dim)
-    """
-    device = embeddings.device
-    samples_per_episode = n_way * (k_shot + n_query)
-    batch_size = embeddings.size(0) // samples_per_episode
-    
-    # 1. Reshape to (Batch_Size, Samples_Per_Episode, Feature_Dim)
-    embeddings = embeddings.view(batch_size, samples_per_episode, -1)
-    
-    # 2. Split into Support and Query
-    # support: (Batch_Size, n_way * k_shot, Dim)
-    # query: (Batch_Size, n_way * n_query, Dim)
-    support = embeddings[:, :n_way * k_shot]
-    query = embeddings[:, n_way * k_shot:]
-    
-    # 3. Calculate prototypes for each episode in the batch
-    # prototypes shape: (Batch_Size, n_way, Dim)
-    prototypes = support.reshape(batch_size, n_way, k_shot, -1).mean(dim=2)
-    
-    # 4. Compute Squared Euclidean Distance
-    # Using torch.cdist per batch item (requires some broadcasting or loop)
-    # query: (B, Q_total, Dim), prototypes: (B, Way, Dim)
-    distances = torch.cdist(query, prototypes)**2  # (B, Q_total, Way)
-    
-    # 5. Calculate Cross Entropy Loss
-    # Flatten across batch and query dims
-    target_labels = torch.arange(n_way).repeat_interleave(n_query).to(device)
-    target_labels = target_labels.repeat(batch_size) # Repeat for each episode in batch
-    
-    # Reshape distances to (B * Q_total, Way)
-    logits = -distances.reshape(-1, n_way)
-    
-    loss = torch.nn.functional.cross_entropy(logits, target_labels)
-    
-    return loss
-
-# --- 2. Dataset ---
+# --- Dataset ---
 
 def process_target_data(target_data_file):
     """Simulates realistic, variable-length maneuver data."""
@@ -138,86 +74,7 @@ def process_offline_data(offline_data):
             target_segments_list[demo] = all_data.astype(np.float32)
     return target_segments_list
 
-class RobustManeuverDataset(Dataset):
-    def __init__(self, data_dict: Dict[int, List[np.ndarray]], n_way: int, k_shot: int, n_query: int, n_episodes: int):
-        self.data_dict = data_dict
-        self.n_way = n_way
-        self.k_shot = k_shot
-        self.n_query = n_query
-        self.n_episodes = n_episodes
-        self.classes = list(data_dict.keys())
-
-    def __len__(self):
-        return self.n_episodes
-    
-    def __getitem__(self, idx):
-        sampled_classes = random.sample(self.classes, self.n_way)
-        support_set_data = []
-        query_set_data = []
-        
-        for class_id in sampled_classes:
-            all_examples = self.data_dict[class_id]
-            samples = random.sample(all_examples, self.k_shot + self.n_query)
-            
-            # Apply Time-Warping to Support Examples
-            for s in samples[:self.k_shot]:
-                warped = time_warp_augmentation(s)
-                support_set_data.append(warped)
-            
-            # Keep Query examples as they are (or warp them too for more difficulty)
-            query_set_data.extend(samples[self.k_shot:])
-            
-        return support_set_data + query_set_data
-
-
-def custom_collate_fn(batch_list: List[List[np.ndarray]]) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Returns:
-        padded_sequences: (Total_Samples, Max_Len, N_DIM)
-        mask: (Total_Samples, Max_Len) - 1 for real data, 0 for padding
-    """
-    # Flatten the list of lists
-    all_sequences = [seq for episode_data in batch_list for seq in episode_data]
-    
-    if not all_sequences:
-        return torch.empty(0), torch.empty(0)
-
-    max_len = max(s.shape[0] for s in all_sequences)
-    num_samples = len(all_sequences)
-    
-    padded_sequences = torch.zeros(num_samples, max_len, N_DIM, dtype=torch.float32)
-    mask = torch.zeros(num_samples, max_len, dtype=torch.float32)
-    
-    for i, seq in enumerate(all_sequences):
-        length = seq.shape[0]
-        padded_sequences[i, :length, :] = torch.from_numpy(seq)
-        mask[i, :length] = 1.0 # Mark real data
-        
-    return padded_sequences, mask
-
-
-def time_warp_augmentation(sequence, warp_range=(0.8, 1.2)):
-    """
-    Randomly stretches or compresses a maneuver sequence.
-    sequence: numpy array of shape (L, D)
-    warp_range: (min_stretch, max_stretch)
-    """
-    L, D = sequence.shape
-    # 1. Randomly pick a new length
-    warp_factor = np.random.uniform(warp_range[0], warp_range[1])
-    new_len = int(L * warp_factor)
-    
-    # 2. Convert to torch for fast interpolation
-    # Shape needs to be (Batch, Channels, Length) for 1D interpolation
-    seq_tensor = torch.from_numpy(sequence).float().permute(1, 0).unsqueeze(0)
-    
-    # 3. Resample
-    warped_tensor = torch.nn.functional.interpolate(seq_tensor, size=new_len, mode='linear', align_corners=True)
-    
-    # 4. Return as (New_L, D)
-    return warped_tensor.squeeze(0).permute(1, 0).numpy()
-
-# --- 3. Training Loop ---
+# --- Training Loop ---
 def train_robust_network(encoder, maneuver_data):
     print("--- Starting Robust Euclidean Training ---")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -263,40 +120,7 @@ def train_robust_network(encoder, maneuver_data):
             
     return encoder
 
-# --- 4. Retrieval ---
-
-def retrieve_maneuver_dtw(prototype_seq, scene_embeddings):
-    """
-    Finds the best matching subsequence in a scene for a given prototype.
-    prototype_seq: (Len_P, Dim) Tensor
-    scene_embeddings: (Len_S, Dim) Tensor
-    """
-    # 1. Calculate Pairwise Distances (PyTorch is faster for this matrix math)
-    # We use Squared Euclidean Distance
-    distance_matrix = get_distance_matrix(prototype_seq, scene_embeddings)
-    accumulated_cost_matrix = compute_accumulated_cost_matrix_subsequence_dtw_21(
-        distance_matrix
-    )
-    path = compute_optimal_warping_path_subsequence_dtw_21(accumulated_cost_matrix)
-    start = path[0, 1]
-    if start < 0:
-        assert start == -1
-        start = 0
-    end = path[-1, 1]
-    cost = accumulated_cost_matrix[-1, end]
-    normalized_score = cost / len(prototype_seq)
-    # Note that the actual end index is inclusive in this case so +1 to use python : based indexing
-    end = end + 1
-    
-    # 4. Normalize the score by the length of the prototype
-    # This makes scores comparable across different maneuver lengths
-    #final_score = accumulated_cost_matrix[len(prototype_seq), end + 1] / len(prototype_seq)
-    
-    return {
-        "start_idx": int(start),
-        "end_idx": int(end),
-        "score": float(normalized_score)
-    }
+# --- Retrieval ---
 
 def get_prototypes(encoder, reference_maneuvers):
     device = next(encoder.parameters()).device
@@ -332,19 +156,17 @@ def get_prototypes(encoder, reference_maneuvers):
         prototypes[class_id] = torch.stack(resized_embeddings).mean(dim=0)
     return prototypes
 
-def retrieve(encoder, prototypes, offline_data_list, class_names):
+def retrieve(encoder, prototypes, offline_data_list, class_names, thresholds):
     device = next(encoder.parameters()).device
     all_results = dict.fromkeys(class_names.values(), [])
     task_results = [[] for _ in range(N_CLASSES)]
 
-    for offline_data in offline_data_list:
-        task_name = os.path.splitext(offline_data)[0]
-        offline_data = os.path.join(offline_data_dir, offline_data)
+    for offline_data in tqdm(offline_data_list, desc="Processing Offline Data"):
+        task_name = os.path.splitext(os.path.basename(offline_data))[0]
         test_scenes = process_offline_data(offline_data)
-        print(f"Retrieving maneuvers from task: {task_name}")
 
         for class_id, proto_seq in prototypes.items():
-            print(f"Prototype for {class_names[class_id]} ready for DTW retrieval.")
+            class_threshold = thresholds[class_id]
             demo_results = []
             for scene_name, scene_data in test_scenes.items():                
                 with torch.no_grad():
@@ -357,7 +179,7 @@ def retrieve(encoder, prototypes, offline_data_list, class_names):
                 match['scene'] = scene_name
                 match['task'] = task_name
                 # TODO: Tune this threshold based on validation set or target set
-                if match['score'] < 10:  # Arbitrary threshold to filter bad matches
+                if match['score'] < class_threshold:
                     demo_results.append(match)
             # Filter overlaps
             task_results[class_id].extend(demo_results)
@@ -370,16 +192,20 @@ def retrieve(encoder, prototypes, offline_data_list, class_names):
 # --- Main Execution ---
 
 if __name__ == '__main__':
-    # A. Simulate Data
-    # 50 examples per class for robust prototype calculation
-    reference_data = "data/retrieval_results/target_dataset.hdf5"
-    reference_maneuver_data, class_names = process_target_data(reference_data)
-    pretrained = True  # Set to False to train from scratch
-
+    parser = argparse.ArgumentParser(description='Prototype Libero Retrieval')
+    parser.add_argument('--reference_data', type=str, default='data/retrieval_results/target_dataset.hdf5',
+                        help='Path to the reference maneuver data HDF5 file')
+    parser.add_argument('--offline_data_dir', type=str, default='data/LIBERO/libero_90/*demo.hdf5',
+                        help='Path pattern to the offline data HDF5 files')
+    parser.add_argument('--pretrained', action='store_true', default=True,
+                        help='Use pretrained model for retrieval without training')
+    
+    args = parser.parse_args()
+    
+    reference_maneuver_data, class_names = process_target_data(args.reference_data)
     encoder = RobustSequenceEncoder(input_dim=N_DIM, output_dim=FEATURE_SIZE)
 
-    if not pretrained:
-        # B. Train Model
+    if not args.pretrained:
         start_time = time.time()
         encoder = train_robust_network(encoder, reference_maneuver_data)
         training_time = time.time() - start_time
@@ -391,16 +217,18 @@ if __name__ == '__main__':
     else:
         # load the trained model (for inference)
         encoder.load_state_dict(torch.load(f'prototype_libero_model_{N_DIM}.pth'))
-    
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        encoder.to(device)
+
     encoder.eval()
     prototypes = get_prototypes(encoder, reference_maneuver_data)
+    class_thresholds = calibrate_dtw_thresholds(encoder, prototypes, reference_maneuver_data, K_SHOT)
 
     # C. Retrieval
     final_results = {}
-    offline_data_dir = 'data/LIBERO/libero_90/*demo.hdf5'
-    offline_data_list = glob.glob(offline_data_dir)
+    offline_data_list = glob.glob(args.offline_data_dir)
     
-    final_results = retrieve(encoder, prototypes, offline_data_list, class_names)
+    final_results = retrieve(encoder, prototypes, offline_data_list, class_names, class_thresholds)
 
     with open(f'prototype_results_{N_DIM}.json', 'w') as f:
         json.dump(final_results, f, indent=4)
