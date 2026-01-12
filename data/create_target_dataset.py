@@ -2,6 +2,39 @@ import numpy as np
 import h5py
 import os
 
+"""
+stove_on: [data/LIBERO/libero_10/KITCHEN_SCENE3_turn_on_the_stove_and_put_the_moka_pot_on_it_demo.hdf5,
+            data/LIBERO/libero_90/KITCHEN_SCENE3_turn_on_the_stove_demo.hdf5,
+            data/LIBERO/libero_90/KITCHEN_SCENE3_turn_on_the_stove_and_put_the_frying_pan_on_it_demo.hdf5,
+            data/LIBERO/libero_90/KITCHEN_SCENE9_turn_on_the_stove_and_put_the_frying_pan_on_it_demo.hdf5,
+            data/LIBERO/libero_90/KITCHEN_SCENE9_turn_on_the_stove_demo.hdf5
+            ]
+stove_off: [data/LIBERO/libero_90/KITCHEN_SCENE8_turn_off_the_stove_demo.hdf5]
+top_drawer_open: [data/LIBERO/libero_90/KITCHEN_SCENE1_open_the_top_drawer_of_the_cabinet_demo.hdf5,
+                    data/LIBERO/libero_10/KITCHEN_SCENE1_open_the_top_drawer_of_the_cabinet_and_put_the_bowl_in_it_demo.hdf5,
+                    data/LIBERO/libero_90/KITCHEN_SCENE2_open_the_top_drawer_of_the_cabinet_demo.hdf5,
+                    data/LIBERO/libero_90/KITCHEN_SCENE4_close_the_bottom_drawer_of_the_cabinet_and_open_the_top_drawer_demo.hdf5,
+                  ]
+top_drawer_close: [data/LIBERO/libero_90/KITCHEN_SCENE5_close_the_top_drawer_of_the_cabinet_demo.hdf5,
+                   data/LIBERO/libero_90/KITCHEN_SCENE10_close_the_top_drawer_of_the_cabinet_demo.hdf5,
+                   data/LIBERO/libero_10/KITCHEN_SCENE10_close_the_top_drawer_of_the_cabinet_and_put_the_black_bowl_on_top_of_it_demo.hdf5,
+                   data/LIBERO/libero_90/KITCHEN_SCENE10_put_the_butter_at_the_back_in_the_top_drawer_of_the_cabinet_and_close_it_demo.hdf5,
+                   data/LIBERO/libero_90/KITCHEN_SCENE10_put_the_butter_at_the_front_in_the_top_drawer_of_the_cabinet_and_close_it_demo.hdf5,
+                   data/LIBERO/libero_90/KITCHEN_SCENE10_put_the_chocolate_pudding_in_the_top_drawer_of_the_cabinet_and_close_it_demo.hdf5
+                  ]
+bottom_drawer_open: [data/LIBERO/libero_90/KITCHEN_SCENE1_open_the_bottom_drawer_of_the_cabinet_demo.hdf5,
+                     ]
+bottom_drawer_close: [data/LIBERO/libero_90/KITCHEN_SCENE4_close_the_bottom_drawer_of_the_cabinet_demo.hdf5,
+                        data/LIBERO/libero_10/KITCHEN_SCENE4_put_the_black_bowl_in_the_bottom_drawer_of_the_cabinet_and_close_it_demo.hdf5,
+                        data/LIBERO/libero_90/KITCHEN_SCENE4_close_the_bottom_drawer_of_the_cabinet_and_open_the_top_drawer_demo.hdf5
+                     ]
+microwave_open: [data/LIBERO/libero_90/KITCHEN_SCENE7_open_the_microwave_demo.hdf5,
+                 ]
+microwave_close: [data/LIBERO/libero_10/KITCHEN_SCENE6_put_the_yellow_and_white_mug_in_the_microwave_and_close_it_demo.hdf5,
+                   data/LIBERO/libero_90/KITCHEN_SCENE6_close_the_microwave_demo.hdf5
+"""
+
+
 target_data_dict = {
     'pnp': {
         'sources': {

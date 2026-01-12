@@ -44,7 +44,6 @@ sdist/
 var/
 wheels/
 logs/
-data/
 legacy/
 .cursor/
 .claude/
@@ -217,5 +216,10 @@ pyrightconfig.json
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/python,linux,visualstudiocode
+data/videos
 prototype_libero_model_12.pth
 Untitled.ipynb
+prototype_results_12.json
+prototype_libero_model.pth
+.gitignore
+prototype_strap_results_12.json

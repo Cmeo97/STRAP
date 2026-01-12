@@ -2,10 +2,14 @@ import os
 import numpy as np
 import stumpy
 from dtaidistance.subsequence.dtw import subsequence_search
-
+from strap.utils.retrieval_utils import (
+   compute_accumulated_cost_matrix_subsequence_dtw_21,
+   compute_optimal_warping_path_subsequence_dtw_21,
+   get_distance_matrix
+)
 stumpy.config.STUMPY_EXCL_ZONE_DENOM = np.inf
 
-def stumpy_matching(query, series, top_k=None, dist_thres = None):
+def stumpy_single_matching(query, series, top_k=None, dist_thres = None):
 
   # stumpy requires query and series is of dimension x length shape
   if query.shape[0] > query.shape[1]:
@@ -29,7 +33,7 @@ def stumpy_matching(query, series, top_k=None, dist_thres = None):
 
   return result
 
-def dtaidistance_matching(query, series, top_k=None, dist_thres = None):
+def dtaidistance_single_matching(query, series, top_k=None, dist_thres = None):
   s = []
   w = query.shape[0]
   stride = int(np.floor(w/2))
@@ -55,6 +59,23 @@ def dtaidistance_matching(query, series, top_k=None, dist_thres = None):
     result[i].append(start_indexes[match.idx] + w)
 
   return result
+
+def modified_strap_single_matching(query, series):
+    distance_matrix = get_distance_matrix(query, series)
+    accumulated_cost_matrix = compute_accumulated_cost_matrix_subsequence_dtw_21(
+        distance_matrix
+    )
+    path = compute_optimal_warping_path_subsequence_dtw_21(accumulated_cost_matrix)
+    start = path[0, 1]
+    if start < 0:
+        assert start == -1
+        start = 0
+    end = path[-1, 1]
+    cost = accumulated_cost_matrix[-1, end]
+    # Note that the actual end index is inclusive in this case so +1 to use python : based indexing
+    end = end + 1
+
+    return [cost, start, end]
 
 def llm_matching(query, series, top_k=None):
     # Placeholder for LLM-based matching implementation
