@@ -74,12 +74,12 @@ def retrieve_maneuver_dtw(prototype_seq, scene_embeddings):
     # This makes scores comparable across different maneuver lengths
     
     return {
+        "cost": float(normalized_score),
         "start_idx": int(start),
-        "end_idx": int(end),
-        "score": float(normalized_score)
+        "end_idx": int(end)
     }
 
-def calibrate_dtw_thresholds(encoder, prototypes, reference_maneuvers, K_SHOT):
+def calibrate_dtw_thresholds(encoder, prototypes, reference_maneuvers, K_SHOT, std_mult=1.0):
     """
     Calculates the average DTW distance between the Prototype and its own members.
     This gives us a class-specific threshold for 'what a good match looks like'.
@@ -103,7 +103,7 @@ def calibrate_dtw_thresholds(encoder, prototypes, reference_maneuvers, K_SHOT):
                 
                 # Perform DTW
                 match = retrieve_maneuver_dtw(proto_seq.cpu().numpy(), sample_features.cpu().numpy())
-                scores.append(match['score'])
+                scores.append(match['cost'])
         
         # Threshold = Mean + 2 * Std Dev (Common heuristic for anomaly detection)
         # This allows for some variance while filtering out bad matches.
@@ -111,7 +111,7 @@ def calibrate_dtw_thresholds(encoder, prototypes, reference_maneuvers, K_SHOT):
         std_dist = np.std(scores)
         
         # We set the threshold slightly above the average to allow for test-time variance
-        class_thresholds[class_id] = mean_dist + (1.0 * std_dist)
+        class_thresholds[class_id] = mean_dist + (std_mult * std_dist)
         
         print(f"Class {class_id} | Mean Dist: {mean_dist:.4f} | Calibrated Threshold: {class_thresholds[class_id]:.4f}")
 

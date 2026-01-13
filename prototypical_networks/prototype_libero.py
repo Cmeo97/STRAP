@@ -28,6 +28,9 @@ from prototypical_networks.prototype_utils import (
     retrieve_maneuver_dtw,
     calibrate_dtw_thresholds
 )
+
+from benchmarking.benchmark_utils import process_retrieval_results
+
 # --- Configuration Constants ---
 N_DIM = 12              # Number of features
 FEATURE_SIZE = 512      # Output size of the learned embedding
@@ -37,7 +40,7 @@ N_CLASSES = 9           # Number of maneuver types
 N_WAY = 5               # Number of classes per episode
 K_SHOT = 7              # Number of support examples per class
 N_QUERY = 3             # Number of query examples per class
-N_EPISODES = 300        # Total training episodes
+N_EPISODES = 400        # Total training episodes
 
 # --- Training Loop ---
 def train_robust_network(encoder, maneuver_data):
@@ -121,53 +124,63 @@ def get_prototypes(encoder, reference_maneuvers):
         prototypes[class_id] = torch.stack(resized_embeddings).mean(dim=0)
     return prototypes
 
-def retrieve(encoder, prototypes, offline_data_list, class_names, thresholds):
+def prototype_retrieval(encoder, prototypes, offline_data_list, output_path, episode_names, thresholds):
     device = next(encoder.parameters()).device
-    all_results = dict.fromkeys(class_names.values(), [])
-    task_results = [[] for _ in range(N_CLASSES)]
-
-    for offline_data in tqdm(offline_data_list, desc="Processing Offline Data"):
-        task_name = os.path.splitext(os.path.basename(offline_data))[0]
-        test_scenes = process_offline_data(offline_data)
-
+    with h5py.File(output_path, 'w') as outfile:
+        results = outfile.create_group('results')
         for class_id, proto_seq in prototypes.items():
-            class_threshold = thresholds[class_id]
-            demo_results = []
-            for scene_name, scene_data in test_scenes.items():                
-                with torch.no_grad():
-                    scene_tensor = torch.from_numpy(scene_data).float().unsqueeze(0).to(device)
-                    # Scenes are usually large, so this returns (Scene_L, Feature_Dim)
-                    scene_features = encoder(scene_tensor, return_temporal=True).squeeze(0)
-                
-                # Numba DTW handles the different lengths of proto vs scene automatically
-                match = retrieve_maneuver_dtw(proto_seq.cpu().numpy(), scene_features.cpu().numpy())
-                match['scene'] = scene_name
-                match['task'] = task_name
-                # TODO: Tune this threshold based on validation set or target set
-                if match['score'] < class_threshold:
-                    demo_results.append(match)
-            # Filter overlaps
-            task_results[class_id].extend(demo_results)
-    
-    for class_id in range(N_CLASSES):
-        task_results[class_id] = sorted(task_results[class_id], key=lambda x: x['score'])
-        all_results[class_names[class_id]] = task_results[class_id]
+            episode_threshold = thresholds[class_id]
+            episode_key = episode_names[class_id]
+            episode = results.create_group(episode_key)
+            episode_results = []
+            for offline_file in tqdm(offline_data_list, desc=f"Retrieving data for {episode_key}"):
+                task_name = os.path.splitext(os.path.basename(offline_file))[0]
+                test_scenes = process_offline_data(offline_file)
+                for demo_key, demo_data in test_scenes.items():                
+                    with torch.no_grad():
+                        scene_tensor = torch.from_numpy(demo_data).float().unsqueeze(0).to(device)
+                        # Scenes are usually large, so this returns (Scene_L, Feature_Dim)
+                        scene_features = encoder(scene_tensor, return_temporal=True).squeeze(0)
+                    
+                    # Numba DTW handles the different lengths of proto vs scene automatically
+                    match = retrieve_maneuver_dtw(proto_seq.cpu().numpy(), scene_features.cpu().numpy())
+                    if match['cost'] < episode_threshold:
+                        episode_results.append({
+                            'cost': match['cost'],
+                            'start_idx': match['start_idx'],
+                            'end_idx': match['end_idx'],
+                            'demo_key': demo_key,
+                            'offline_file': offline_file
+                        })
+            processed_results = process_retrieval_results(episode_results, top_k=100)
+            for match_key, data in processed_results.items():
+                match_group = episode.create_group(match_key)
+                match_group.attrs['ep_meta'] = json.dumps({
+                        "lang": data['lang_instruction']
+                    })
+                match_group.attrs['file_path'] = data['file_path']
+                match_group.attrs['demo_key'] = data['demo_key']
+                for data_key, value in data.items():
+                    if data_key not in ['file_path', 'demo_key', 'lang_instruction']:
+                        match_group.create_dataset(data_key, data=value)
 
-    return all_results
 # --- Main Execution ---
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Prototype Libero Retrieval')
-    parser.add_argument('--reference_data', type=str, default='data/retrieval_results/target_dataset.hdf5',
+    parser.add_argument('--reference_data', type=str, default='data/target_data/target_dataset.hdf5',
                         help='Path to the reference maneuver data HDF5 file')
     parser.add_argument('--offline_data_dir', type=str, default='data/LIBERO/libero_90/*demo.hdf5',
                         help='Path pattern to the offline data HDF5 files')
+    parser.add_argument('--output_path', default='data/retrieval_results/retrieval_results_prototype.hdf5',
+                        help='Saved file path')
     parser.add_argument('--pretrained', action='store_true', default=False,
                         help='Use pretrained model for retrieval without training')
+    parser.add_argument('--checkpoint_file', default='prototype_libero_model.pth')
     
     args = parser.parse_args()
     
-    reference_maneuver_data, class_names = process_target_data(args.reference_data)
+    reference_maneuver_data, episode_names = process_target_data(args.reference_data)
     encoder = RobustSequenceEncoder(input_dim=N_DIM, output_dim=FEATURE_SIZE)
 
     if not args.pretrained:
@@ -177,23 +190,22 @@ if __name__ == '__main__':
         print(f"Total training time: {training_time:.2f} seconds.")
     
         # Save the trained model
-        torch.save(encoder.state_dict(), f'prototype_libero_model_{N_DIM}.pth')
+        torch.save(encoder.state_dict(), args.checkpoint_file)
 
     else:
         # load the trained model (for inference)
-        encoder.load_state_dict(torch.load(f'prototype_libero_model_{N_DIM}.pth'))
+        if not os.path.exists(args.checkpoint_file):
+            raise ValueError("Checkpoint file not found!! Train the model first.")
+        encoder.load_state_dict(torch.load(args.checkpoint_file))
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         encoder.to(device)
 
     encoder.eval()
     prototypes = get_prototypes(encoder, reference_maneuver_data)
-    class_thresholds = calibrate_dtw_thresholds(encoder, prototypes, reference_maneuver_data, K_SHOT)
+    episode_thresholds = calibrate_dtw_thresholds(encoder, prototypes, reference_maneuver_data, K_SHOT, std_mult=1.0)
 
     # C. Retrieval
     final_results = {}
     offline_data_list = glob.glob(args.offline_data_dir)
     
-    final_results = retrieve(encoder, prototypes, offline_data_list, class_names, class_thresholds)
-
-    with open(f'prototype_results_{N_DIM}.json', 'w') as f:
-        json.dump(final_results, f, indent=4)
+    prototype_retrieval(encoder, prototypes, offline_data_list, args.output_path, episode_names, episode_thresholds)
