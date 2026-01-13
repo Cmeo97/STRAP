@@ -40,11 +40,6 @@ def load_reference_hdf5(path: str) -> Dict[str, np.ndarray]:
             ee_pos = f[episode]["ee_pos"][()]            # (N, T, D1)
             gripper_states = f[episode]["gripper_states"][()]  # (N, T, D2)
             joint_states = f[episode]["joint_states"][()]      # (N, T, D3)
-            print(
-                f"  ee_pos shape: {ee_pos.shape}, "
-                f"gripper_states shape: {gripper_states.shape}, "
-                f"joint_states shape: {joint_states.shape}"
-            )
             # Each of these is (N, T, D)
             # Concatenate along the feature dimension (last axis)
             features = [ee_pos, gripper_states, joint_states]
@@ -97,8 +92,11 @@ def run_evaluation(
         evaluator = UnsupervisedRetrievalEvaluator(
             retrieval_data,
             reference[episode],
+            viz_dir="visualizations",
         )
+        os.makedirs("visualizations", exist_ok=True)
         results[episode] = evaluator.evaluate()
+        evaluator.distributional_checker(episode=episode)
 
     return results
 
@@ -107,7 +105,7 @@ def run_evaluation(
 # python -m benchmarking.evaluate_retrieval_results \
 #   --retrieved_path data/retrieval_results/retrieval_results_stumpy.hdf5 \
 #   --reference_path data/target_data/target_dataset.hdf5 \
-#   --output_json data/results/stumpy_results.json
+#   --output_json stumpy_results.json
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--retrieved_path", type=str, required=True)
@@ -120,7 +118,6 @@ def main():
         reference_hdf5=args.reference_path,
     )
 
-    os.makedirs(os.path.dirname(args.output_json), exist_ok=True)
     with open(args.output_json, "w") as f:
         json.dump(results, f, indent=2)
 
