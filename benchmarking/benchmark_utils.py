@@ -84,7 +84,8 @@ def transform_series_to_text(series, use_sax=False, sax_num_bins=26):
             # Map bins to symbols
             symbols = [sax_symbols[idx] if idx < len(sax_symbols) else sax_symbols[-1] for idx in digitized]
             values = "\t".join(symbols)
-            lines.append(f"{feature_names[i]}\t{values}")
+            # Add "[SAX]" prefix to indicate to the LLM this is a SAX representation
+            lines.append(f"{feature_names[i]}\t[SAX Representation]\t{values}")
     else:
         for i in range(series_t.shape[0]):
             values = "\t".join(f"{series_t[i, t]:.4f}" for t in range(seq_len))
