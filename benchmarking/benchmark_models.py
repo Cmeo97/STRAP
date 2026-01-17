@@ -7,10 +7,11 @@ from strap.utils.retrieval_utils import (
    compute_optimal_warping_path_subsequence_dtw_21,
    get_distance_matrix
 )
+from benchmarking.benchmark_utils import transform_series_to_text
 stumpy.config.STUMPY_EXCL_ZONE_DENOM = np.inf
 
-def stumpy_single_matching(query, series, top_k=None, dist_thres = None):
 
+def stumpy_single_matching(query, series, top_k=None, dist_thres = None):
   # stumpy requires query and series is of dimension x length shape
   if query.shape[0] > query.shape[1]:
     query = np.swapaxes(query, 0, 1)
@@ -77,7 +78,39 @@ def modified_strap_single_matching(query, series):
 
     return [cost, start, end]
 
-def llm_matching(query, series, top_k=None):
-    # Placeholder for LLM-based matching implementation
-    # This function should interface with a language model to perform matching
-    raise NotImplementedError("LLM-based matching is not implemented yet.")
+
+def llm_matching(query, series, top_k=None, embedder_model=None, use_sax=False):
+    """
+    Perform sliding window over `series` (the document), transform each window to text for embedding,
+    and match with the query's embedding. Returns a list of [cost, start_idx, end_idx] for the top_k best matches.
+    The start_idx and end_idx returned are from the series, that is, the indices in the series that are cutoff by the sliding window.
+    """
+    query_length = query.shape[0]
+    total_windows = series.shape[0] - query_length + 1
+    if query_length > series.shape[0] or total_windows <= 0:
+        return []
+
+    query_text = transform_series_to_text(query, use_sax=use_sax)
+    all_series = [transform_series_to_text(series[i:i+query_length], use_sax=use_sax) for i in range(total_windows)]
+
+    query_embedding = embedder_model.encode([query_text])      # shape (1, D)
+    all_series_embeddings = embedder_model.encode(all_series)  # shape (N, D)
+
+    cosine_sim_matrix = embedder_model.match(query_embedding, all_series_embeddings)  # shape (1, N)
+    similarities = cosine_sim_matrix[0]  # shape (N,)
+    costs = 1.0 - similarities  # shape (N,)
+
+    window_indices = [(i, i + query_length) for i in range(total_windows)]
+
+    # Select the top_k lowest costs (= highest cosine similarities)
+    if top_k is None or top_k > len(costs):
+        top_k = len(costs)
+    top_k_indices = np.argsort(costs)[:top_k]
+
+    results = []
+    for idx in top_k_indices:
+        start_idx, end_idx = window_indices[idx]
+        cost = costs[idx]
+        results.append([cost, start_idx, end_idx])
+
+    return results

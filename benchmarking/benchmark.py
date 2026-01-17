@@ -12,12 +12,17 @@ from strap.configs.libero_file_functions import get_libero_lang_instruction
 from benchmarking.benchmark_models import (
     stumpy_single_matching,
     dtaidistance_single_matching,
-    modified_strap_single_matching
+    modified_strap_single_matching,
+    llm_matching
 )
+from sentence_transformers import SentenceTransformer
 from benchmarking.benchmark_utils import get_demo_data, process_retrieval_results
 from strap.utils.retrieval_utils import segment_trajectory_by_derivative, merge_short_segments
 
-def stumpy_dtaidistance_retrieval(output_path, stumpy=True, dtaidistance=False):
+def stumpy_dtaidistance_retrieval(output_path, stumpy=True, dtaidistance=False, qwen_embedder=False, qwen_use_sax=False):
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    if qwen_embedder or qwen_use_sax:
+        qwen_embedder = SentenceTransformer("Qwen/Qwen3-Embedding-8B")
     with h5py.File(output_path, 'w') as outfile:
         results = outfile.create_group('results')
         with h5py.File(target_data_path, 'r') as f:
@@ -39,6 +44,8 @@ def stumpy_dtaidistance_retrieval(output_path, stumpy=True, dtaidistance=False):
                                  result = stumpy_single_matching(target_series, offline_series, top_k=1)
                             if dtaidistance:
                                  result = dtaidistance_single_matching(target_series, offline_series, top_k=1)
+                            if qwen_embedder or qwen_use_sax:
+                                 result = llm_matching(target_series, offline_series, top_k=1, embedder_model=qwen_embedder, use_sax=qwen_use_sax)
                             for match in result:
                                 if match:
                                     episode_results.append({
@@ -61,6 +68,7 @@ def stumpy_dtaidistance_retrieval(output_path, stumpy=True, dtaidistance=False):
                             match_group.create_dataset(data_key, data=value)
 
 def modified_strap_retrieval(output_file, demo_per_task=1, min_length=60):
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
     with h5py.File(output_file, 'w') as outfile:
         results = outfile.create_group('results')
         episode_id = 0
@@ -147,6 +155,8 @@ if __name__ == "__main__":
     libero_10_list = glob.glob(os.path.join(libero_10_dir, "*demo.hdf5"))
     libero_90_list = glob.glob(os.path.join(libero_90_dir, "*demo.hdf5"))
     
-    modified_strap_retrieval("data/retrieval_results/retrieval_results_modified_strap.hdf5")
-    stumpy_dtaidistance_retrieval("data/retrieval_results/retrieval_results_stumpy.hdf5", stumpy=True, dtaidistance=False)
-    stumpy_dtaidistance_retrieval("data/retrieval_results/retrieval_results_dtaidistance.hdf5", stumpy=False, dtaidistance=True)
+    # modified_strap_retrieval("data/retrieval_results/retrieval_results_modified_strap.hdf5")
+    # stumpy_dtaidistance_retrieval("data/retrieval_results/retrieval_results_stumpy.hdf5", stumpy=True, dtaidistance=False)
+    # stumpy_dtaidistance_retrieval("data/retrieval_results/retrieval_results_dtaidistance.hdf5", stumpy=False, dtaidistance=True)
+    stumpy_dtaidistance_retrieval("data/retrieval_results/retrieval_results_llm.hdf5", stumpy=False, dtaidistance=False, qwen_embedder=True, qwen_use_sax=False)
+    stumpy_dtaidistance_retrieval("data/retrieval_results/retrieval_results_llm_sax.hdf5", stumpy=False, dtaidistance=False, qwen_embedder=True, qwen_use_sax=True)

@@ -1,6 +1,7 @@
 import os
 import h5py
 import numpy as np
+from string import ascii_uppercase
 
 from strap.configs.libero_file_functions import get_libero_lang_instruction
 
@@ -44,3 +45,49 @@ def process_retrieval_results(episode_results, top_k=None, max_distance=None):
             output[f"match_{i}"]['demo_key'] = result['demo_key']
             output[f"match_{i}"]['lang_instruction'] = get_libero_lang_instruction(f, result['demo_key'])
     return output
+
+
+def transform_series_to_text(series, use_sax=False, sax_num_bins=26):
+    """
+    Transpose a (seq_length, features) time series to (features, seq_length),
+    and return a string representation where each feature is a row and timesteps are columns.
+    If use_sax is True, represent each feature's time series using SAX (Symbolic Aggregate approXimation).
+    """
+    feature_names = [
+        "ee_pose_x", "ee_pose_y", "ee_pose_z",
+        "gripper_state_0", "gripper_state_1",
+        "joint_0", "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"
+    ]
+    series_t = series.T  # shape: (features, seq_len)
+    seq_len = series_t.shape[1]
+
+    header = "step\t" + "\t".join(str(i) for i in range(seq_len))
+    lines = [header]
+
+    if use_sax:
+        sax_symbols = ascii_uppercase[:sax_num_bins]
+
+        for i in range(series_t.shape[0]):
+            x = series_t[i]
+            x_mean = np.mean(x)
+            x_std = np.std(x)
+            if x_std == 0:
+                norm_x = np.zeros_like(x)
+            else:
+                norm_x = (x - x_mean) / x_std
+            # Define bin edges at quantiles, so bins have equal support in normal distribution
+            bin_edges = np.quantile(norm_x, np.linspace(0, 1, sax_num_bins + 1))
+            # To avoid duplicate bin edges from constant value series
+            bin_edges = np.unique(bin_edges)
+            # Assign each value to a bin based on bin_edges
+            digitized = np.digitize(norm_x, bin_edges[1:-1], right=False)  # Returns ints in [0, bins-1]
+            # Map bins to symbols
+            symbols = [sax_symbols[idx] if idx < len(sax_symbols) else sax_symbols[-1] for idx in digitized]
+            values = "\t".join(symbols)
+            lines.append(f"{feature_names[i]}\t{values}")
+    else:
+        for i in range(series_t.shape[0]):
+            values = "\t".join(f"{series_t[i, t]:.4f}" for t in range(seq_len))
+            lines.append(f"{feature_names[i]}\t{values}")
+
+    return "\n".join(lines)
