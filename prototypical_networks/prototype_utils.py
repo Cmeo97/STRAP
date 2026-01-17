@@ -7,6 +7,8 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from scipy.interpolate import interp1d
 
+from strap.utils.retrieval_utils import compute_accumulated_cost_matrix_subsequence_dtw_21, compute_optimal_warping_path_subsequence_dtw_21
+
 def reduce_features_pca(time_series_2d, n_components=10):
     """
     Reduces the feature dimension of a single 2D time series sample 

@@ -134,7 +134,6 @@ def prototype_retrieval(encoder, prototypes, offline_data_list, output_path, epi
             episode = results.create_group(episode_key)
             episode_results = []
             for offline_file in tqdm(offline_data_list, desc=f"Retrieving data for {episode_key}"):
-                task_name = os.path.splitext(os.path.basename(offline_file))[0]
                 test_scenes = process_offline_data(offline_file)
                 for demo_key, demo_data in test_scenes.items():                
                     with torch.no_grad():

@@ -109,25 +109,18 @@ def run_evaluation(
 def main():
     DEFAULT_OUTPUT_DIR = "retrieval_eval_outputs"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--retrieved_path", type=str, required=True)
-    parser.add_argument("--reference_path", type=str, required=True)
-    parser.add_argument("--output_file", 
-        type=str, 
-        required=True, 
-        help=f"Path to output JSON with results. Form: '{DEFAULT_OUTPUT_DIR}/[output_file].json'"
-    )
+    parser.add_argument("--retrieved_path", default='data/retrieval_results/libero_retrieval_results_stumpy.hdf5')
+    parser.add_argument("--reference_path", default='data/target_data/libero_target_dataset.hdf5')
+    parser.add_argument("--output_json", default='data/retrieval_results/libero_stumpy_result.json')
     args = parser.parse_args()
-
-    # Always save output in DEFAULT_OUTPUT_DIR
-    os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
-    output_json = os.path.join(DEFAULT_OUTPUT_DIR, os.path.basename(args.output_file))
+    os.makedirs(os.path.dirname(args.output_json), exist_ok=True)
 
     results = run_evaluation(
         retrieved_hdf5=args.retrieved_path,
         reference_hdf5=args.reference_path,
     )
 
-    with open(output_json, "w") as f:
+    with open(args.output_json, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Saved results JSON to {output_json}")
 

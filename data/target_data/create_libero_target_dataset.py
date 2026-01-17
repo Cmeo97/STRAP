@@ -171,8 +171,8 @@ def resize_to_mean_length(task_data_list):
     
     return np.stack(resized, axis=0)
 
-def create_target_data():
-    with h5py.File('data/retrieved_results/target_dataset.hdf5', 'w') as f:
+def create_target_data(output_file):
+    with h5py.File(output_file, 'w') as f:
         for task in target_data_dict.keys():
             task_data = {
                 'actions': [],
@@ -199,10 +199,10 @@ def create_target_data():
             print("---------------------------------------------------")
             # Resize all data to mean length
             f[task].create_dataset('actions', data=resize_to_mean_length(task_data['actions']))
-            f[task].create_dataset('gripper_states', data=resize_to_mean_length(task_data['gripper_states']))
-            f[task].create_dataset('joint_states', data=resize_to_mean_length(task_data['joint_states']))
-            f[task].create_dataset('ee_pos', data=resize_to_mean_length(task_data['ee_pos']))
+            f[task].create_dataset('obs/gripper_states', data=resize_to_mean_length(task_data['gripper_states']))
+            f[task].create_dataset('obs/joint_states', data=resize_to_mean_length(task_data['joint_states']))
+            f[task].create_dataset('obs/ee_pos', data=resize_to_mean_length(task_data['ee_pos']))
             f[task].create_dataset('robot_states', data=resize_to_mean_length(task_data['robot_states']))
 
 if __name__ == "__main__":
-    create_target_data()
+    create_target_data("data/target_data/libero_target_dataset.hdf5")
