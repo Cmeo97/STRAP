@@ -34,9 +34,7 @@ def load_reference_hdf5(path: str) -> Dict[str, np.ndarray]:
     """
     out = {}
     with h5py.File(path, "r") as f:
-        print(f"Reference HDF5 file keys: {list(f.keys())}")
         for episode in f.keys():
-            print(f"Loading episode: {episode}")
             ee_pos = f[episode]["ee_pos"][()]            # (N, T, D1)
             gripper_states = f[episode]["gripper_states"][()]  # (N, T, D2)
             joint_states = f[episode]["joint_states"][()]      # (N, T, D3)
@@ -44,9 +42,7 @@ def load_reference_hdf5(path: str) -> Dict[str, np.ndarray]:
             # Concatenate along the feature dimension (last axis)
             features = [ee_pos, gripper_states, joint_states]
             data = np.concatenate(features, axis=-1)   # (N, T, F)
-            print(f"  Concatenated feature shape (N, T, F): {data.shape}")
             out[episode] = data
-            print(f"  Final data shape: {out[episode].shape}")
     return out
 
 
@@ -79,8 +75,8 @@ def run_evaluation(
 ) -> Dict[str, Dict[str, float]]:
     retrieved = load_retrieved_hdf5(retrieved_hdf5)
     reference = load_reference_hdf5(reference_hdf5)
-    print(retrieved['bottom_drawer_close'].shape)
-    print(reference['bottom_drawer_close'].shape)
+    print(f"[Evaluation] Retrieved data shape: {retrieved['bottom_drawer_close'].shape}")
+    print(f"[Evaluation] Reference data shape: {reference['bottom_drawer_close'].shape}")
 
     results: Dict[str, Dict[str, float]] = {}
 
@@ -95,31 +91,45 @@ def run_evaluation(
             viz_dir="visualizations",
         )
         os.makedirs("visualizations", exist_ok=True)
+
+        # CPU parallelism for parallelized metric run. Not necessary cuz this is very fast.
+        # results[episode] = evaluator.evaluate(parallel=True) 
         results[episode] = evaluator.evaluate()
+
         evaluator.distributional_checker(episode=episode)
 
     return results
 
 
 # Example usage:
-# python -m benchmarking.evaluate_retrieval_results \
+# python benchmarking/evaluate_retrieval_results.py \
 #   --retrieved_path data/retrieval_results/retrieval_results_stumpy.hdf5 \
 #   --reference_path data/target_data/target_dataset.hdf5 \
-#   --output_json stumpy_results.json
+#   --output_file stumpy_results.json
 def main():
+    DEFAULT_OUTPUT_DIR = "retrieval_eval_outputs"
     parser = argparse.ArgumentParser()
     parser.add_argument("--retrieved_path", type=str, required=True)
     parser.add_argument("--reference_path", type=str, required=True)
-    parser.add_argument("--output_json", type=str, required=True)
+    parser.add_argument("--output_file", 
+        type=str, 
+        required=True, 
+        help=f"Path to output JSON with results. Form: '{DEFAULT_OUTPUT_DIR}/[output_file].json'"
+    )
     args = parser.parse_args()
+
+    # Always save output in DEFAULT_OUTPUT_DIR
+    os.makedirs(DEFAULT_OUTPUT_DIR, exist_ok=True)
+    output_json = os.path.join(DEFAULT_OUTPUT_DIR, os.path.basename(args.output_file))
 
     results = run_evaluation(
         retrieved_hdf5=args.retrieved_path,
         reference_hdf5=args.reference_path,
     )
 
-    with open(args.output_json, "w") as f:
+    with open(output_json, "w") as f:
         json.dump(results, f, indent=2)
+    print(f"Saved results JSON to {output_json}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Dict
+from typing import Dict, Any
 from scipy.stats import wasserstein_distance
 from scipy.signal import correlate
 from scipy.spatial.distance import cdist
@@ -7,7 +7,7 @@ from dtaidistance import dtw_ndim
 from tqdm import tqdm
 import os
 import matplotlib.pyplot as plt
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class UnsupervisedRetrievalEvaluator:
     """
@@ -69,7 +69,7 @@ class UnsupervisedRetrievalEvaluator:
         Operates on flattened samples:
         (N*T, F)
         """
-        print("Running wasserstein metric...")
+        print("[Metrics] Running wasserstein metric...")
         r = self.retrieved.reshape(-1, self.F)
         ref = self.reference.reshape(-1, self.F)
 
@@ -77,31 +77,35 @@ class UnsupervisedRetrievalEvaluator:
             wasserstein_distance(r[:, f], ref[:, f])
             for f in tqdm(range(self.F), desc="Wasserstein: features")
         ]))
-        print(f"Finished wasserstein: {result}")
+        print(f"[Metrics] Finished wasserstein: {result}")
         return result
 
     def dtw_nn(self) -> float:
         """
-        Nearest-neighbor multivariate DTW.
+        Nearest-neighbor multivariate DTW (C-optimized).
 
         For each retrieved trajectory, compute minimum DTW distance
         to any reference trajectory.
         """
-        print("Running dtw_nn metric...")
+        print("[Metrics] Running dtw_nn metric (C-optimized)...")
         dists = []
 
+        # Ensure contiguous float64 for C backend
+        reference = [np.ascontiguousarray(ref, dtype=np.float64) for ref in self.reference]
+
         for r in tqdm(self.retrieved, desc="DTW-NN: retrieved trajectories"):
-            r = np.asarray(r, dtype=np.float64)
+            r = np.ascontiguousarray(r, dtype=np.float64)
             best = np.inf
-            for ref in self.reference:
-                d = dtw_ndim.distance(r, ref)
+            for ref in reference:
+                d = dtw_ndim.distance_fast(r, ref)  # C optimization
                 if d < best:
                     best = d
             dists.append(best)
 
         result = float(np.mean(dists))
-        print(f"Finished dtw_nn: {result}")
+        print(f"[Metrics] Finished dtw_nn metric: {result}")
         return result
+
 
     def spectral_wasserstein(self, eps: float = 1e-8) -> float:
         """
@@ -109,7 +113,7 @@ class UnsupervisedRetrievalEvaluator:
 
         PSD computed per feature, averaged over dataset.
         """
-        print("Running spectral_wasserstein metric...")
+        print("[Metrics] Running spectral_wasserstein metric...")
         def avg_psd(x: np.ndarray) -> np.ndarray:
             # x: (N, T, F) -> (F, T)
             fft = np.fft.fft(x, axis=1)
@@ -130,7 +134,7 @@ class UnsupervisedRetrievalEvaluator:
             dists.append(wasserstein_distance(p, q))
 
         result = float(np.mean(dists))
-        print(f"Finished spectral_wasserstein: {result}")
+        print(f"[Metrics] Finished spectral_wasserstein metric: {result}")
         return result
 
     def temporal_correlation(self) -> float:
@@ -138,7 +142,7 @@ class UnsupervisedRetrievalEvaluator:
         Max normalized cross-correlation, averaged over
         all (retrieved, reference, feature) tuples.
         """
-        print("Running temporal_correlation metric...")
+        print("[Metrics] Running temporal_correlation metric...")
         vals = []
 
         for f in tqdm(range(self.F), desc="Temporal Correlation: features"):
@@ -154,7 +158,7 @@ class UnsupervisedRetrievalEvaluator:
                     vals.append(np.max(c) / (r_norm * ref_norm))
 
         result = float(np.mean(vals))
-        print(f"Finished temporal_correlation: {result}")
+        print(f"[Metrics] Finished temporal_correlation metric: {result}")
         return result
 
     def distributional_coverage(self, k: int = 5) -> Dict[str, float]:
@@ -207,27 +211,61 @@ class UnsupervisedRetrievalEvaluator:
             "coverage": float(coverage),
         }
 
-    def diversity_icd(self) -> float:
+    # def diversity_icd(self) -> float:
+    #     """
+    #     Intra-set DTW diversity over retrieved samples.
+
+    #     Average pairwise DTW distance.
+    #     """
+    #     print("[Metrics] Running diversity_icd metric...")
+    #     n = self.N_r
+    #     total = 0.0
+    #     count = 0
+
+    #     for i in tqdm(range(n), desc="Diversity ICD: first index"):
+    #         for j in range(i + 1, n):
+    #             total += dtw_ndim.distance(
+    #                 self.retrieved[i],
+    #                 self.retrieved[j],
+    #             )
+    #             count += 1
+
+    #     result = float(total / count)
+    #     print(f"[Metrics] Finished diversity_icd metric: {result}")
+    #     return result
+    def diversity_icd(
+        self,
+        window: int | None = None,
+    ) -> float:
         """
         Intra-set DTW diversity over retrieved samples.
 
-        Average pairwise DTW distance.
+        Optimized version:
+        - Uses C-optimized distance_matrix_fast
+        - Computes all pairwise distances once
+        - Aggregates upper triangle only
+
+        Args:
+            window: Sakoe-Chiba window (int). If None, full DTW.
+
+        Returns:
+            Mean pairwise DTW distance.
         """
-        print("Running diversity_icd metric...")
-        n = self.N_r
-        total = 0.0
-        count = 0
+        print("[Metrics] Running diversity_icd (optimized)...")
 
-        for i in tqdm(range(n), desc="Diversity ICD: first index"):
-            for j in range(i + 1, n):
-                total += dtw_ndim.distance(
-                    self.retrieved[i],
-                    self.retrieved[j],
-                )
-                count += 1
+        X = np.asarray(self.retrieved, dtype=np.float64)
 
-        result = float(total / count)
-        print(f"Finished diversity_icd: {result}")
+        # Compute full distance matrix (NxN)
+        D = dtw_ndim.distance_matrix_fast(
+            X,
+            window=window,
+        )
+
+        # Extract upper triangle without diagonal
+        iu = np.triu_indices(D.shape[0], k=1)
+        result = float(D[iu].mean())
+
+        print(f"[Metrics] Finished diversity_icd (optimized): {result}")
         return result
 
     def distributional_checker(self, episode: str = None):
@@ -278,22 +316,72 @@ class UnsupervisedRetrievalEvaluator:
         out_path = os.path.join(out_dir, "distributional_checker.png")
         plt.savefig(out_path)
         plt.close()
-        print(f"Saved distributional_checker plot to {out_path}")
+        print(f"[Metrics] Saved distributional_checker plot to {out_path}")
 
     # ------------------------------------------------------------------
     # Aggregate
     # ------------------------------------------------------------------
+    # Parallel evaluator using ThreadPoolExecutor
 
-    def evaluate(self) -> Dict[str, float]:
+    class _MetricJobRunner:
+        def __init__(self, evaluator: "UnsupervisedRetrievalEvaluator"):
+            self.evaluator = evaluator
+            # (name, fn) pairs
+            self.metrics = [
+                ("wasserstein", evaluator.wasserstein),
+                ("dtw_nn", evaluator.dtw_nn),
+                ("spectral_wasserstein", evaluator.spectral_wasserstein),
+                ("temporal_correlation", evaluator.temporal_correlation),
+                ("distributional_coverage", evaluator.distributional_coverage),
+                ("diversity_icd", evaluator.diversity_icd),
+            ]
+
+        def run_parallel(self, max_workers: int = None) -> Dict[str, Any]:
+            print("[Metrics] Starting evaluation of retrieval metrics (concurrent)...")
+            results: Dict[str, Any] = {}
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_metric = {
+                    executor.submit(fn): name for name, fn in self.metrics
+                }
+                for future in as_completed(future_to_metric):
+                    name = future_to_metric[future]
+                    try:
+                        res = future.result()
+                        # Handle dict-valued metric (distributional_coverage)
+                        if isinstance(res, dict):
+                            for k, v in res.items():
+                                results[f"{name}.{k}"] = v
+                        else:
+                            results[name] = res
+                    except Exception as exc:
+                        print(f"[Metrics] {name} generated an exception: {exc}")
+                        results[name] = None
+            print("[Metrics] Finished concurrent evaluation of retrieval metrics.")
+            return results
+
+    def evaluate(self, parallel: bool = False, max_workers: int = None) -> Dict[str, float]:
         """
-        Run all metrics.
+        Run all metrics serially (default) or concurrently (parallel=True).
         """
-        print("Starting evaluation of retrieval metrics...")
-        return {
-            "wasserstein": self.wasserstein(),
-            "dtw_nn": self.dtw_nn(),
-            "spectral_wasserstein": self.spectral_wasserstein(),
-            "temporal_correlation": self.temporal_correlation(),
-            "distributional_coverage": self.distributional_coverage(),
-            "diversity_icd": self.diversity_icd(),
-        }
+        if parallel:
+            runner = self._MetricJobRunner(self)
+            return runner.run_parallel(max_workers=max_workers)
+        else:
+            print("[Metrics] Starting evaluation of retrieval metrics (serial)...")
+            res = {
+                "wasserstein": self.wasserstein(),
+                "dtw_nn": self.dtw_nn(),
+                "spectral_wasserstein": self.spectral_wasserstein(),
+                "temporal_correlation": self.temporal_correlation(),
+                "distributional_coverage": self.distributional_coverage(),
+                "diversity_icd": self.diversity_icd(),
+            }
+            # If any values are dicts (e.g., distributional_coverage), flatten them
+            flat_results = {}
+            for k, v in res.items():
+                if isinstance(v, dict):
+                    for subk, subv in v.items():
+                        flat_results[f"{k}.{subk}"] = subv
+                else:
+                    flat_results[k] = v
+            return flat_results
