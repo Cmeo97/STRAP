@@ -9,3 +9,4 @@ numba
 scipy
 stumpy
 dtaidistance
+sentence-transformers

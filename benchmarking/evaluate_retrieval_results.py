@@ -9,13 +9,12 @@ import numpy as np
 from benchmarking.benchmark_eval_metrics import UnsupervisedRetrievalEvaluator
 
 # The 'ee_pos' key in the reference set corresponds to 'ee_pose'
-FEATURE_KEYS = ["ee_pose", "gripper_states", "joint_states"]
-REFERENCE_FEATURE_KEYS = ["ee_pos", "gripper_states", "joint_states"]
+FEATURE_KEYS = ["ee_pos", "gripper_states", "joint_states"]
 
 def concat_obs_group(obs_group: h5py.Group, feature_keys=None) -> np.ndarray:
     """
     Concatenate obs features along feature dimension.
-
+    
     Returns:
         (T, F_total)
     """
@@ -35,13 +34,14 @@ def load_reference_hdf5(path: str) -> Dict[str, np.ndarray]:
     out = {}
     with h5py.File(path, "r") as f:
         for episode in f.keys():
-            ee_pos = f[episode]["ee_pos"][()]            # (N, T, D1)
-            gripper_states = f[episode]["gripper_states"][()]  # (N, T, D2)
-            joint_states = f[episode]["joint_states"][()]      # (N, T, D3)
-            # Each of these is (N, T, D)
-            # Concatenate along the feature dimension (last axis)
-            features = [ee_pos, gripper_states, joint_states]
-            data = np.concatenate(features, axis=-1)   # (N, T, F)
+            episode_data = f[episode]
+            # libero dataset structure
+            if "obs/ee_pos" in episode_data:
+                feature_keys = ["ee_pos", "gripper_states", "joint_states"]
+            # nuscene dataset structure
+            elif "obs/velocity" in episode_data:
+                feature_keys = ["velocity", "acceleration", "yaw_rate"]
+            data = concat_obs_group(episode_data["obs"], feature_keys=feature_keys)
             out[episode] = data
     return out
 
@@ -62,7 +62,11 @@ def load_retrieved_hdf5(path: str) -> Dict[str, np.ndarray]:
                 if not k.startswith("match_"):
                     continue
                 obs = results_group[episode][k]["obs"]
-                matches.append(concat_obs_group(obs, feature_keys=FEATURE_KEYS))
+                if 'ee_pos' in obs:
+                    feature_keys = ["ee_pos", "gripper_states", "joint_states"]
+                elif 'velocity' in obs:
+                    feature_keys = ["velocity", "acceleration", "yaw_rate"]
+                matches.append(concat_obs_group(obs, feature_keys=feature_keys))
             if not matches:
                 raise ValueError(f"No matches found for episode {episode}")
             out[episode] = np.stack(matches, axis=0)
@@ -75,8 +79,8 @@ def run_evaluation(
 ) -> Dict[str, Dict[str, float]]:
     retrieved = load_retrieved_hdf5(retrieved_hdf5)
     reference = load_reference_hdf5(reference_hdf5)
-    print(f"[Evaluation] Retrieved data shape: {retrieved['bottom_drawer_close'].shape}")
-    print(f"[Evaluation] Reference data shape: {reference['bottom_drawer_close'].shape}")
+    print(f"[Evaluation] Retrieved data length: {len(retrieved)}")
+    print(f"[Evaluation] Reference data length: {len(reference)}")
 
     results: Dict[str, Dict[str, float]] = {}
 
@@ -100,27 +104,28 @@ def run_evaluation(
 
     return results
 
-
-# Example usage:
-# python benchmarking/evaluate_retrieval_results.py \
-#   --retrieved_path data/retrieval_results/retrieval_results_stumpy.hdf5 \
-#   --reference_path data/target_data/target_dataset.hdf5 \
-#   --output_file stumpy_results.json
 def main():
-    DEFAULT_OUTPUT_DIR = "retrieval_eval_outputs"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--retrieved_path", default='data/retrieval_results/libero_retrieval_results_stumpy.hdf5')
-    parser.add_argument("--reference_path", default='data/target_data/libero_target_dataset.hdf5')
-    parser.add_argument("--output_json", default='data/retrieval_results/libero_stumpy_result.json')
+    parser.add_argument("--dataset", default='libero')
+    parser.add_argument("--metric", default='stumpy')
+    parser.add_argument("--retrieved_path", default='data/retrieval_results/')
+    parser.add_argument("--reference_path", default='data/target_data/')
+    parser.add_argument("--output_path", default='data/evaluation_results/')
+    
     args = parser.parse_args()
-    os.makedirs(os.path.dirname(args.output_json), exist_ok=True)
+
+    target_path = os.path.join(args.reference_path, f"{args.dataset}_target_dataset.hdf5")
+    retrieved_path = os.path.join(args.retrieved_path, f"{args.dataset}_retrieval_results_{args.metric}.hdf5")
+    output_json = os.path.join(args.output_path, f"{args.dataset}_retrieval_evaluation_{args.metric}.json")
+
+    os.makedirs(os.path.dirname(output_json), exist_ok=True)
 
     results = run_evaluation(
-        retrieved_hdf5=args.retrieved_path,
-        reference_hdf5=args.reference_path,
+        retrieved_hdf5=retrieved_path,
+        reference_hdf5=target_path,
     )
 
-    with open(args.output_json, "w") as f:
+    with open(output_json, "w") as f:
         json.dump(results, f, indent=2)
     print(f"Saved results JSON to {output_json}")
 
