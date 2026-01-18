@@ -127,7 +127,7 @@ def main():
 
     with open(output_json, "w") as f:
         json.dump(results, f, indent=2)
-    print(f"Saved results JSON to {output_json}")
+    print(f"Saved results JSON to {args.output_json}")
 
 
 if __name__ == "__main__":

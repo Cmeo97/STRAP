@@ -23,7 +23,7 @@ from strap.utils.retrieval_utils import segment_trajectory_by_derivative, merge_
 def stumpy_dtaidistance_retrieval(target_path, offline_list, output_path, stumpy=True, dtaidistance=False, TOP_K=100, qwen_embedder=False, qwen_use_sax=False):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     if qwen_embedder or qwen_use_sax:
-        qwen_embedder = SentenceTransformer("Qwen/Qwen3-Embedding-8B")
+        qwen_embedder = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
     with h5py.File(output_path, 'w') as outfile:
         results = outfile.create_group('results')
         with h5py.File(target_path, 'r') as f:
@@ -149,6 +149,10 @@ def benchmark_libero(args):
                                   stumpy=True, dtaidistance=False)
     stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_dtaidistance.hdf5', 
                                   stumpy=False, dtaidistance=True)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_llm.hdf5', 
+    #                               stumpy=False, dtaidistance=False, qwen_embedder=True, qwen_use_sax=False)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_llm_sax.hdf5', 
+    #                               stumpy=False, dtaidistance=False, qwen_embedder=True, qwen_use_sax=True)
     end_time = time.time()
     print(f"Total Benchmarking Time for Libero Dataset: {(end_time - start_time)/60:.2f} minutes.")
 

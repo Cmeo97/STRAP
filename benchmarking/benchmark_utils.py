@@ -79,9 +79,9 @@ def process_retrieval_results(episode_results, length = None, top_k=None, max_di
 
 def transform_series_to_text(series, use_sax=False, sax_num_bins=26):
     """
-    Transpose a (seq_length, features) time series to (features, seq_length),
-    and return a string representation where each feature is a row and timesteps are columns.
-    If use_sax is True, represent each feature's time series using SAX (Symbolic Aggregate approXimation).
+    Transform a (seq_length, features) time series to a compact string representation.
+    For floats: feature_name: [float1, float2, ...]
+    For SAX:    feature_name: AABBCA...
     """
     feature_names = [
         "ee_pose_x", "ee_pose_y", "ee_pose_z",
@@ -90,13 +90,9 @@ def transform_series_to_text(series, use_sax=False, sax_num_bins=26):
     ]
     series_t = series.T  # shape: (features, seq_len)
     seq_len = series_t.shape[1]
-
-    header = "step\t" + "\t".join(str(i) for i in range(seq_len))
-    lines = [header]
-
+    lines = []
     if use_sax:
         sax_symbols = ascii_uppercase[:sax_num_bins]
-
         for i in range(series_t.shape[0]):
             x = series_t[i]
             x_mean = np.mean(x)
@@ -107,18 +103,13 @@ def transform_series_to_text(series, use_sax=False, sax_num_bins=26):
                 norm_x = (x - x_mean) / x_std
             # Define bin edges at quantiles, so bins have equal support in normal distribution
             bin_edges = np.quantile(norm_x, np.linspace(0, 1, sax_num_bins + 1))
-            # To avoid duplicate bin edges from constant value series
             bin_edges = np.unique(bin_edges)
-            # Assign each value to a bin based on bin_edges
-            digitized = np.digitize(norm_x, bin_edges[1:-1], right=False)  # Returns ints in [0, bins-1]
-            # Map bins to symbols
+            digitized = np.digitize(norm_x, bin_edges[1:-1], right=False)
             symbols = [sax_symbols[idx] if idx < len(sax_symbols) else sax_symbols[-1] for idx in digitized]
-            values = "\t".join(symbols)
-            # Add "[SAX]" prefix to indicate to the LLM this is a SAX representation
-            lines.append(f"{feature_names[i]}\t[SAX Representation]\t{values}")
+            values = "".join(symbols)
+            lines.append(f"{feature_names[i]}: {values}")
     else:
         for i in range(series_t.shape[0]):
-            values = "\t".join(f"{series_t[i, t]:.4f}" for t in range(seq_len))
-            lines.append(f"{feature_names[i]}\t{values}")
-
+            vals = [float(f"{series_t[i, t]:.6f}") for t in range(seq_len)]
+            lines.append(f"{feature_names[i]}: {vals}")
     return "\n".join(lines)
