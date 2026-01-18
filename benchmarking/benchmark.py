@@ -143,10 +143,10 @@ def benchmark_libero(args):
     libero_90_list = glob.glob(os.path.join(libero_90_dir, "*demo.hdf5"))
     
     start_time = time.time()
-    modified_strap_retrieval(libero_10_list, libero_90_list, f'{args.output_dir}/libero_retrieval_results_modified_strap.hdf5', 
-                             demo_per_task=1, min_length=60)
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_stumpy.hdf5', 
-                                  stumpy=True, dtaidistance=False)
+    # modified_strap_retrieval(libero_10_list, libero_90_list, f'{args.output_dir}/libero_retrieval_results_modified_strap.hdf5', 
+    #                          demo_per_task=1, min_length=60)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_stumpy.hdf5', 
+    #                               stumpy=True, dtaidistance=False)
     stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_dtaidistance.hdf5', 
                                   stumpy=False, dtaidistance=True)
     # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_llm.hdf5', 
@@ -162,8 +162,8 @@ def benchmark_nuscene(args):
     offline_list = glob.glob(os.path.join(offline_data_dir, "*.hdf5"))
     
     start_time = time.time()
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_stumpy.hdf5', 
-                                  stumpy=True, dtaidistance=False, TOP_K=20)
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_stumpy.hdf5', 
+    #                               stumpy=True, dtaidistance=False, TOP_K=20)
     stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_dtaidistance.hdf5',
                                 stumpy=False, dtaidistance=True, TOP_K=20)
     end_time = time.time()

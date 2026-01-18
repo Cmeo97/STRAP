@@ -10,56 +10,62 @@ from strap.utils.retrieval_utils import (
 from benchmarking.benchmark_utils import transform_series_to_text
 stumpy.config.STUMPY_EXCL_ZONE_DENOM = np.inf
 
+def stumpy_single_matching(query, series, top_k=None, dist_thres=None):
+    # stumpy requires query and series is of dimension x length shape
+    if query.shape[0] > query.shape[1]:
+        query = np.swapaxes(query, 0, 1)
+        series = np.swapaxes(series, 0, 1)
 
-def stumpy_single_matching(query, series, top_k=None, dist_thres = None):
-  # stumpy requires query and series is of dimension x length shape
-  if query.shape[0] > query.shape[1]:
-    query = np.swapaxes(query, 0, 1)
-    series = np.swapaxes(series, 0, 1)
+    if query.shape[1] > series.shape[1]:
+        return []
 
-  if query.shape[1] > series.shape[1]:
-    return []
+    if not dist_thres:
+        dist_thres = lambda D: max(np.mean(D) - 2 * np.std(D), np.min(D))
 
-  if not dist_thres:
-    dist_thres = lambda D: max(np.mean(D) - 2 * np.std(D), np.min(D))
+    matches = stumpy.match(query, series, max_matches=top_k, max_distance=dist_thres)
+    result = [[] for _ in range(len(matches))]
+    for i, match in enumerate(matches):
+        result[i].append(match[0])
+        result[i].append(int(match[1]))
+        result[i].append(int(match[1] + query.shape[1]))
 
-  matches = stumpy.match(query, series, max_matches=top_k,
-                      max_distance=dist_thres
-                      )
-  result = [[] for _ in range(len(matches))]
-  for i, match in enumerate(matches):
-    result[i].append(match[0])
-    result[i].append(int(match[1]))
-    result[i].append(int(match[1] + query.shape[1]))
+    return result
 
-  return result
+def dtaidistance_single_matching(query, series, top_k=None, dist_thres=None):
+    # Minimal changes for dimension handling
+    # query: (seq_len, features) or (num_queries, seq_len, features)
+    # series: (seq_len, features)
+    if query.ndim == 3:
+        query = query[0]
+    if series.ndim == 3:
+        series = series[0]
+    w = query.shape[0]
+    stride = int(np.floor(w / 2))
+    if stride < 1:
+        stride = 1
+    wn = int(np.floor((len(series) - (w - stride)) / stride))
+    if not top_k:
+        top_k = wn
 
-def dtaidistance_single_matching(query, series, top_k=None, dist_thres = None):
-  s = []
-  w = query.shape[0]
-  stride = int(np.floor(w/2))
-  wn = int(np.floor((len(series) - (w - stride)) / stride))
-  if not top_k:
-    top_k = wn
+    s = []
+    start_indexes = []
+    si, ei = 0, w
+    for i in range(wn):
+        s.append(series[si:ei])
+        start_indexes.append(si)
+        si += stride
+        ei += stride
 
-  start_indexes = []
-  si, ei = 0, w
-  for i in range(wn):
-      s.append(series[si:ei])
-      si += stride
-      ei += stride
-      start_indexes.append(si)
+    sa = subsequence_search(query, s, max_dist=dist_thres, use_lb=False)
+    best = sa.kbest_matches(k=top_k)
 
-  sa = subsequence_search(query, s, max_dist=dist_thres, use_lb=False)
-  best = sa.kbest_matches(k=top_k)
+    result = [[] for _ in range(len(best))]
+    for i, match in enumerate(best):
+        result[i].append(match.distance)
+        result[i].append(start_indexes[match.idx])
+        result[i].append(start_indexes[match.idx] + w)
 
-  result = [[] for _ in range(len(best))]
-  for i, match in enumerate(best):
-    result[i].append(match.distance)
-    result[i].append(start_indexes[match.idx])
-    result[i].append(start_indexes[match.idx] + w)
-
-  return result
+    return result
 
 def modified_strap_single_matching(query, series):
     distance_matrix = get_distance_matrix(query, series)
