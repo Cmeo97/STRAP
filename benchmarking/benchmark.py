@@ -40,7 +40,7 @@ def stumpy_dtaidistance_retrieval(target_path, offline_list, output_path, stumpy
                             if stumpy:
                                  result = stumpy_single_matching(target_series[0], offline_series, top_k=1)
                             if dtaidistance:
-                                 result = dtaidistance_single_matching(target_series, offline_series, top_k=1)
+                                 result = dtaidistance_single_matching(target_series[0], offline_series, top_k=1)
                             if qwen_embedder or qwen_use_sax:
                                  result = llm_matching(target_series, offline_series, top_k=1, embedder_model=qwen_embedder, use_sax=qwen_use_sax)
                             for match in result:

@@ -5,6 +5,21 @@ from string import ascii_uppercase
 from scipy.interpolate import interp1d
 from strap.configs.libero_file_functions import get_libero_lang_instruction
 
+# The 'ee_pos' key in the reference set corresponds to 'ee_pose'
+FEATURE_KEYS = ["ee_pos", "gripper_states", "joint_states"]
+
+def concat_obs_group(obs_group: h5py.Group, feature_keys=None) -> np.ndarray:
+    """
+    Concatenate obs features along feature dimension.
+    
+    Returns:
+        (T, F_total)
+    """
+    if feature_keys is None:
+        feature_keys = FEATURE_KEYS
+    features = [obs_group[k][()] for k in feature_keys]
+    return np.concatenate(features, axis=-1)
+
 def resize_scipy(data, new_size):
     # Create an index for current data (0 to 399)
     x_old = np.linspace(0, 1, data.shape[0])
@@ -19,17 +34,11 @@ def get_demo_data(hdf5_dataset, demo_key):
     demo_data = hdf5_dataset[demo_key]
     # Libero dataset structure
     if 'obs/ee_pos' in demo_data and 'obs/gripper_states' in demo_data and 'obs/joint_states' in demo_data:
-        ee_pose = demo_data['obs/ee_pos'][:]
-        gripper_states = demo_data['obs/gripper_states'][:]
-        joint_states = demo_data['obs/joint_states'][:]
-        series = np.concatenate((ee_pose, gripper_states, joint_states), axis=-1)
+        series = concat_obs_group(demo_data['obs'], feature_keys=['ee_pos', 'gripper_states', 'joint_states'])
         return series
     # Nuscene dataset structure
     if 'obs/velocity' in demo_data and 'obs/acceleration' in demo_data and 'obs/yaw_rate' in demo_data:
-        velocity = demo_data['obs/velocity'][:]
-        acceleration = demo_data['obs/acceleration'][:]
-        yaw_rate = demo_data['obs/yaw_rate'][:]
-        series =  np.concatenate((velocity, acceleration, yaw_rate), axis=-1)
+        series = concat_obs_group(demo_data['obs'], feature_keys=['velocity', 'acceleration', 'yaw_rate'])
         return series
 
 def process_retrieval_results(episode_results, length = None, top_k=None, max_distance=None):

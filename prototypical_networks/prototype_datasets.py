@@ -6,7 +6,7 @@ import numpy as np
 import random
 import time
 import h5py
-
+from benchmarking.benchmark_utils import concat_obs_group
 
 class RobustManeuverDataset(Dataset):
     def __init__(self, data_dict: Dict[int, List[np.ndarray]], n_way: int, k_shot: int, n_query: int, n_episodes: int):
@@ -94,19 +94,13 @@ def process_target_data(target_data_file):
     class_names ={}
     with h5py.File(target_data_file, 'r') as f:
         for i, task in enumerate(f.keys()):
-            data = f[task]
+            obs = f[task]['obs']
             # for libero dataset structure
-            if 'joint_states' in data and 'gripper_states' in data and 'ee_pos' in data:
-                joint_states = data['joint_states'][:]
-                gripper_states = data['gripper_states'][:]
-                ee_pos = data['ee_pos'][:]
-                all_data = np.concatenate([joint_states, gripper_states, ee_pos], axis=2)
+            if 'joint_states' in obs and 'gripper_states' in obs and 'ee_pos' in obs:
+                all_data = concat_obs_group(obs, feature_keys=['joint_states', 'gripper_states', 'ee_pos'])
             # for nuscene dataset structure
-            elif 'velocity' in data and 'acceleration' in data and 'yaw_rate' in data:
-                velocity = data['velocity'][:]
-                acceleration = data['acceleration'][:]
-                yaw_rate = data['yaw_rate'][:]
-                all_data = np.concatenate([velocity, acceleration, yaw_rate], axis=2)
+            elif 'velocity' in obs and 'acceleration' in obs and 'yaw_rate' in obs:
+                all_data = concat_obs_group(obs, feature_keys=['velocity', 'acceleration', 'yaw_rate'])
             # Convert to list of 2D arrays for sampling
             maneuvers[i] = [all_data[j] for j in range(all_data.shape[0])]
             class_names[i] = task
@@ -119,17 +113,12 @@ def process_offline_data(offline_data):
         data = f['data']
         demo_list = list(data.keys())
         for demo in demo_list:
+            obs = data[demo]['obs']
             # for libero dataset structure
-            if 'obs/joint_states' in data[demo] and 'obs/gripper_states' in data[demo] and 'obs/ee_pos' in data[demo]:
-                joint_states = data[demo]['obs/joint_states'][:]
-                gripper_states = data[demo]['obs/gripper_states'][:]
-                ee_pos = data[demo]['obs/ee_pos'][:]
-                all_data = np.concatenate([joint_states, gripper_states, ee_pos], axis=1)
+            if 'joint_states' in obs and 'gripper_states' in obs and 'ee_pos' in obs:
+                all_data = concat_obs_group(obs, feature_keys=['joint_states', 'gripper_states', 'ee_pos'])
             # for nuscene dataset structure
-            elif 'obs/velocity' in data[demo] and 'obs/acceleration' in data[demo] and 'obs/yaw_rate' in data[demo]:
-                velocity = data[demo]['obs/velocity'][:]
-                acceleration = data[demo]['obs/acceleration'][:]
-                yaw_rate = data[demo]['obs/yaw_rate'][:]
-                all_data = np.concatenate([velocity, acceleration, yaw_rate], axis=1)
+            elif 'velocity' in obs and 'acceleration' in obs and 'yaw_rate' in obs:
+                all_data = concat_obs_group(obs, feature_keys=['velocity', 'acceleration', 'yaw_rate'])
             target_segments_list[demo] = all_data.astype(np.float32)
     return target_segments_list

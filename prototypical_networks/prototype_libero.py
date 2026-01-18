@@ -34,10 +34,8 @@ from benchmarking.benchmark_utils import process_retrieval_results
 # --- Configuration Constants ---
 N_DIM = 12              # Number of features
 FEATURE_SIZE = 512      # Output size of the learned embedding
-N_CLASSES = 9           # Number of maneuver types
 
 # Training Parameters
-N_WAY = 5               # Number of classes per episode
 K_SHOT = 7              # Number of support examples per class
 N_QUERY = 3             # Number of query examples per class
 N_EPISODES = 400        # Total training episodes
@@ -167,19 +165,23 @@ def prototype_retrieval(encoder, prototypes, offline_data_list, output_path, epi
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Prototype Libero Retrieval')
-    parser.add_argument('--reference_data', type=str, default='data/target_data/target_dataset.hdf5',
+    parser.add_argument('--reference_data', type=str, default='data/target_data/libero_target_dataset.hdf5',
                         help='Path to the reference maneuver data HDF5 file')
     parser.add_argument('--offline_data_dir', type=str, default='data/LIBERO/libero_90/*demo.hdf5',
                         help='Path pattern to the offline data HDF5 files')
-    parser.add_argument('--output_path', default='data/retrieval_results/retrieval_results_prototype.hdf5',
+    parser.add_argument('--output_path', default='data/retrieval_results/libero_retrieval_results_prototype.hdf5',
                         help='Saved file path')
-    parser.add_argument('--pretrained', action='store_true', default=False,
+    parser.add_argument('--pretrained', action='store_true', default=True,
                         help='Use pretrained model for retrieval without training')
     parser.add_argument('--checkpoint_file', default='prototype_libero_model.pth')
     
     args = parser.parse_args()
     
     reference_maneuver_data, episode_names = process_target_data(args.reference_data)
+    N_DIM =reference_maneuver_data[0][0].shape[-1]
+    N_CLASSES = len(reference_maneuver_data)
+    N_WAY = N_CLASSES//2  # Update N_WAY based on number of classes
+    
     encoder = RobustSequenceEncoder(input_dim=N_DIM, output_dim=FEATURE_SIZE)
 
     if not args.pretrained:
@@ -204,7 +206,5 @@ if __name__ == '__main__':
     episode_thresholds = calibrate_dtw_thresholds(encoder, prototypes, reference_maneuver_data, K_SHOT, std_mult=1.0)
 
     # C. Retrieval
-    final_results = {}
     offline_data_list = glob.glob(args.offline_data_dir)
-    
     prototype_retrieval(encoder, prototypes, offline_data_list, args.output_path, episode_names, episode_thresholds)

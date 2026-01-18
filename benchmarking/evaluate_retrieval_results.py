@@ -7,18 +7,7 @@ import h5py
 import numpy as np
 
 from benchmarking.benchmark_eval_metrics import UnsupervisedRetrievalEvaluator
-
-
-def concat_obs_group(obs_group: h5py.Group, feature_keys=None) -> np.ndarray:
-    """
-    Concatenate all features in obs_group along the last axis, in sorted key order.
-    Returns:
-        (T, F_total)
-    """
-    # Include only dataset keys (values are datasets, not subgroups)
-    features = [obs_group[k][()] for k in sorted(obs_group.keys()) if isinstance(obs_group[k], h5py.Dataset)]
-    return np.concatenate(features, axis=-1) if features else np.array([])
-
+from benchmarking.benchmark_utils import concat_obs_group
 
 def load_reference_hdf5(path: str) -> Dict[str, np.ndarray]:
     """
