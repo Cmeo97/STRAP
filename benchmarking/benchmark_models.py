@@ -11,7 +11,6 @@ from benchmarking.benchmark_utils import transform_series_to_text
 stumpy.config.STUMPY_EXCL_ZONE_DENOM = np.inf
 
 def stumpy_single_matching(query, series, top_k=None, dist_thres=None):
-    # stumpy requires query and series is of dimension x length shape
     if query.shape[0] > query.shape[1]:
         query = np.swapaxes(query, 0, 1)
         series = np.swapaxes(series, 0, 1)
@@ -32,9 +31,6 @@ def stumpy_single_matching(query, series, top_k=None, dist_thres=None):
     return result
 
 def dtaidistance_single_matching(query, series, top_k=None, dist_thres=None):
-    # Minimal changes for dimension handling
-    # query: (seq_len, features) or (num_queries, seq_len, features)
-    # series: (seq_len, features)
     if query.ndim == 3:
         query = query[0]
     if series.ndim == 3:
