@@ -229,19 +229,24 @@ class UnsupervisedRetrievalEvaluator:
 
         return result
 
-    def distributional_checker(self, episode: str = None):
+    def distributional_checker(self, dataset: str = None, method: str = None, task: str = None):
         """
         Generates a visualization of the flattened feature marginals
         comparing retrieved and reference distributions.
-        The visualization is output in self.viz_dir/episode.png (NOT a subdirectory).
+        The visualization is output in visualization/[dataset]/[method]/[task].png
         Args:
-            episode (str): episode name to use as filename in output path.
+            dataset (str): dataset name (e.g., 'libero', 'nuscene')
+            method (str): method name (e.g., 'stumpy', 'dtaidistance')
+            task (str): task/episode name to use as filename in output path.
         """
 
-        if self.viz_dir is None:
-            raise ValueError("viz_dir must be specified for distributional_checker")
+        if dataset is None or method is None or task is None:
+            raise ValueError("dataset, method, and task must be specified for distributional_checker")
 
-        os.makedirs(self.viz_dir, exist_ok=True)
+        # Construct output path: visualization/[dataset]/[method]/[task].png
+        output_dir = os.path.join("visualization", dataset, method)
+        os.makedirs(output_dir, exist_ok=True)
+        out_path = os.path.join(output_dir, f"{task}.png")
 
         r = self._flatten_2d(self.retrieved)  # (N_r * T, F)
         ref = self._flatten_2d(self.reference)  # (N_ref * T, F)
@@ -271,11 +276,6 @@ class UnsupervisedRetrievalEvaluator:
                 ax.axis('off')
         plt.tight_layout()
 
-        # Output as viz_dir/episode.png if episode is given, else viz_dir/distributional_checker.png
-        if episode is not None:
-            out_path = os.path.join(self.viz_dir, f"{episode}.png")
-        else:
-            out_path = os.path.join(self.viz_dir, "distributional_checker.png")
         plt.savefig(out_path)
         plt.close()
 

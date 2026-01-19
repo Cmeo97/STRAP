@@ -1,7 +1,7 @@
 import os
 import json
 import argparse
-from typing import Dict, List
+from typing import Dict, List, Any
 from tqdm.auto import tqdm
 import h5py
 import numpy as np
@@ -79,8 +79,9 @@ def generate_sliding_windows(
 def evaluate_with_sliding_windows(
     retrieved: np.ndarray,
     reference: np.ndarray,
-    viz_dir: str = None,
-    episode: str = None,
+    dataset: str = None,
+    method: str = None,
+    task: str = None,
 ) -> Dict[str, float]:
     """
     Evaluate metrics using sliding windows for sequence pairs of different lengths.
@@ -96,10 +97,10 @@ def evaluate_with_sliding_windows(
 
     # Standard evaluation if lengths match
     if T_r == T_ref:
-        evaluator = UnsupervisedRetrievalEvaluator(retrieved, reference, viz_dir=viz_dir)
+        evaluator = UnsupervisedRetrievalEvaluator(retrieved, reference)
         results = evaluator.evaluate()
-        if episode is not None:
-            evaluator.distributional_checker(episode=episode)
+        if task is not None:
+            evaluator.distributional_checker(dataset=dataset, method=method, task=task)
         print(f"[Evaluation] Final metrics (no sliding): {results}")
         return results
 
@@ -122,23 +123,23 @@ def evaluate_with_sliding_windows(
     all_metrics = []
 
     for i, window in enumerate(
-        tqdm(windows, desc=f"Evaluating sliding windows ({episode})", leave=False)
+        tqdm(windows, desc=f"Evaluating sliding windows ({task})", leave=False)
     ):
         if T_r > T_ref:
             window_retrieved, window_reference = window, fixed
         else:
             window_retrieved, window_reference = fixed, window
 
-        run_dist_check = (i == 0) and (episode is not None)
+        run_dist_check = (i == 0) and (task is not None)
 
         evaluator = UnsupervisedRetrievalEvaluator(
-            window_retrieved, window_reference, viz_dir=viz_dir
+            window_retrieved, window_reference
         )
         metrics = evaluator.evaluate()
         all_metrics.append(metrics)
 
         if run_dist_check:
-            evaluator.distributional_checker(episode=episode)
+            evaluator.distributional_checker(dataset=dataset, method=method, task=task)
 
     # Average all metrics
     averaged_metrics: Dict[str, float] = {}
@@ -158,14 +159,16 @@ def evaluate_with_sliding_windows(
 def run_evaluation(
     retrieved_hdf5: str,
     reference_hdf5: str,
-) -> Dict[str, Dict[str, float]]:
+    dataset: str = None,
+    method: str = None,
+) -> Dict[str, Any]:
     retrieved = load_retrieved_hdf5(retrieved_hdf5)
     reference = load_reference_hdf5(reference_hdf5)
     print(f"[Evaluation] Retrieved data length: {len(retrieved)}")
     print(f"[Evaluation] Reference data length: {len(reference)}")
 
-    os.makedirs("visualizations", exist_ok=True)
     results: Dict[str, Dict[str, float]] = {}
+    all_episode_metrics = []
 
     for episode, retrieval_data in retrieved.items():
         if episode not in reference:
@@ -180,18 +183,33 @@ def run_evaluation(
             metrics = evaluate_with_sliding_windows(
                 retrieved=retrieval_data,
                 reference=reference_data,
-                viz_dir="visualizations",
-                episode=episode,
+                dataset=dataset,
+                method=method,
+                task=episode,
             )
         else:
             evaluator = UnsupervisedRetrievalEvaluator(
-                retrieval_data, reference_data, viz_dir="visualizations"
+                retrieval_data, reference_data
             )
             metrics = evaluator.evaluate()
-            evaluator.distributional_checker(episode=episode)
+            evaluator.distributional_checker(dataset=dataset, method=method, task=episode)
         results[episode] = metrics
+        all_episode_metrics.append(metrics)
 
-    return results
+    # Compute averaged metrics across all episodes
+    averaged_metrics: Dict[str, float] = {}
+    if all_episode_metrics:
+        metric_keys = all_episode_metrics[0].keys()
+        for key in metric_keys:
+            values = [m[key] for m in all_episode_metrics if m.get(key) is not None]
+            averaged_metrics[key] = float(np.mean(values)) if values else None
+
+    # Return results with averaged metrics
+    output = {
+        **results,
+        "averaged_metrics": averaged_metrics
+    }
+    return output
 
 
 def main():
@@ -214,7 +232,12 @@ def main():
     )
     os.makedirs(os.path.dirname(output_json), exist_ok=True)
 
-    results = run_evaluation(retrieved_hdf5=retrieved_path, reference_hdf5=target_path)
+    results = run_evaluation(
+        retrieved_hdf5=retrieved_path,
+        reference_hdf5=target_path,
+        dataset=args.dataset,
+        method=args.metric
+    )
 
     with open(output_json, "w") as f:
         json.dump(results, f, indent=2)
