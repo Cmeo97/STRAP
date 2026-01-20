@@ -11,3 +11,5 @@ scipy
 stumpy
 dtaidistance
 sentence-transformers
+keras
+tslearn==0.8.0

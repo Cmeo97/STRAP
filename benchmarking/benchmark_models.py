@@ -8,6 +8,8 @@ from strap.utils.retrieval_utils import (
    get_distance_matrix
 )
 from benchmarking.benchmark_utils import transform_series_to_text
+from tslearn.preprocessing import TimeSeriesScalerMinMax
+from tslearn.shapelets import LearningShapelets
 stumpy.config.STUMPY_EXCL_ZONE_DENOM = np.inf
 
 def stumpy_single_matching(query, series, top_k=None, dist_thres=None):
@@ -80,6 +82,30 @@ def modified_strap_single_matching(query, series):
 
     return [cost, start, end]
 
+def shaplet_matching(series, shapelet_model: LearningShapelets, window_size, stride):
+    L, D = series.shape
+    window_starts = np.arange(0, L - window_size + 1, stride)
+    
+    candidates = []
+    for i in range(0, len(window_starts)):
+        start_frame = int(window_starts[i])
+        end_frame = int(start_frame + window_size)
+        window = series[start_frame:end_frame, :]
+        window = TimeSeriesScalerMinMax().fit_transform(np.expand_dims(window, axis=0))
+        
+        probability = shapelet_model.predict_proba(window)
+        match = np.argmax(probability)
+
+        # Store candidate if distance is below a threshold (optional, but good practice)
+        # Here, we keep all and let NMS filter
+        candidates.append({
+            "cost": -probability[0][match],
+            "start_idx": start_frame,
+            "end_idx": end_frame,
+            "demo_key": None,
+            "type": match,
+        })
+    return candidates
 
 def llm_matching(query, series, top_k=None, embedder_model=None, use_sax=False):
     """

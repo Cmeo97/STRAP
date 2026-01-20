@@ -14,9 +14,12 @@ from benchmarking.benchmark_models import (
     stumpy_single_matching,
     dtaidistance_single_matching,
     modified_strap_single_matching,
+    shaplet_matching,
     llm_matching
 )
 from sentence_transformers import SentenceTransformer
+from tslearn.preprocessing import TimeSeriesScalerMinMax
+from tslearn.shapelets import LearningShapelets
 from benchmarking.benchmark_utils import get_demo_data, process_retrieval_results
 from strap.utils.retrieval_utils import segment_trajectory_by_derivative, merge_short_segments
 
@@ -134,7 +137,47 @@ def modified_strap_retrieval(libero_10_list, libero_90_list, output_file, demo_p
                                 if data_key not in ['file_path', 'demo_key', 'lang_instruction']:
                                     match_group.create_dataset(data_key, data=value)
                         episode_id += 1
+
+def shaplet_retrieval(target_file, offline_list, output_path, 
+                      shapelet_model: LearningShapelets, window_size, 
+                      stride, TOP_K=100):
     
+    with h5py.File(target_file, 'r') as target_f:
+        label_names = list(target_f.keys())
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with h5py.File(output_path, 'w') as outfile:
+        results = outfile.create_group('results')
+                
+        episode_results = [[] for _ in range(len(label_names))]
+        for offline_file in tqdm(offline_list, desc=f"Shapelet -- Retrieving data"):
+            with h5py.File(offline_file, 'r') as offline_f:
+                offline_data = offline_f['data']
+                for demo_key in list(offline_data.keys()):
+                    offline_series = get_demo_data(offline_data, demo_key)
+                    matches = shaplet_matching(offline_series, shapelet_model, window_size, stride)
+                    for match in matches:
+                        episode_results[match['type']].append({
+                            'cost': match['cost'],
+                            'start_idx': match['start_idx'],
+                            'end_idx': match['end_idx'],
+                            'demo_key': demo_key,
+                            'offline_file': offline_file
+                        })
+        for i in range(len(episode_results)):
+            episode = results.create_group(label_names[i])
+            processed_results = process_retrieval_results(episode_results[i], top_k=TOP_K)
+            for match_key, data in processed_results.items():
+                match_group = episode.create_group(match_key)
+                match_group.attrs['ep_meta'] = json.dumps({
+                        "lang": data['lang_instruction']
+                    })
+                match_group.attrs['file_path'] = data['file_path']
+                match_group.attrs['demo_key'] = data['demo_key']
+                for data_key, value in data.items():
+                    if data_key not in ['file_path', 'demo_key', 'lang_instruction']:
+                        match_group.create_dataset(data_key, data=value)
+
 def benchmark_libero(args):
     target_data_path = args.libero_target
     libero_90_dir = args.libero_90_dir
@@ -147,12 +190,17 @@ def benchmark_libero(args):
     #                          demo_per_task=1, min_length=60)
     # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_stumpy.hdf5', 
     #                               stumpy=True, dtaidistance=False)
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_dtaidistance.hdf5', 
-                                  stumpy=False, dtaidistance=True)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_dtaidistance.hdf5', 
+    #                               stumpy=False, dtaidistance=True)
     # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_llm.hdf5', 
     #                               stumpy=False, dtaidistance=False, qwen_embedder=True, qwen_use_sax=False)
     # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_llm_sax.hdf5', 
-    #                               stumpy=False, dtaidistance=False, qwen_embedder=True, qwen_use_sax=True)
+    #
+    # load the pre-trained shapelet model
+    shapelet_model = LearningShapelets.from_json('shapelet_libero_model.json')
+    shaplet_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_shapelet.hdf5',
+                      shapelet_model, window_size=100, stride=30, TOP_K=100)
+    
     end_time = time.time()
     print(f"Total Benchmarking Time for Libero Dataset: {(end_time - start_time)/60:.2f} minutes.")
 
@@ -166,6 +214,11 @@ def benchmark_nuscene(args):
     #                               stumpy=True, dtaidistance=False, TOP_K=20)
     stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_dtaidistance.hdf5',
                                 stumpy=False, dtaidistance=True, TOP_K=20)
+    # load the pre-trained shapelet model
+    shapelet_model = LearningShapelets.from_json('shapelet_nuscene_model.json')
+    shaplet_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_shapelet.hdf5',
+                      shapelet_model, window_size=800, stride=200, TOP_K=20)
+    
     end_time = time.time()
     print(f"Total Benchmarking Time for Nuscene Dataset: {(end_time - start_time)/60:.2f} minutes.")
 
