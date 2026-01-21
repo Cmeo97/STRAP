@@ -1,0 +1,20 @@
+dataset_paths:
+  libero_target: "data/target_data/libero_target_dataset.hdf5"
+  libero_offline: "data/LIBERO/libero_90/*demo.hdf5"
+  libero_10: "data/LIBERO/libero_10/*demo.hdf5"
+  nuscene_target: "data/target_data/nuscene_target_dataset.hdf5"
+  nuscene_offline: "data/nuscene/*.hdf5"
+  droid_target: "data/target_data/droid_target_dataset.hdf5"
+  droid_offline: "data/droid/*.hdf5"
+
+prototype_ckpt_paths:
+  libero: "checkpoints/libero_prototype_model.pth"
+  nuscene: "checkpoints/nuscene_prototype_model.pth"
+  droid: "checkpoints/droid_prototype_model.pth"
+
+shapelet_ckpt_paths:
+  libero: "checkpoints/libero_shapelet_model.json"
+  nuscene: "checkpoints/nuscene_shapelet_model.json"
+  droid: "checkpoints/droid_shapelet_model.json"
+
+retrieval_paths: "data/retrieval_results"

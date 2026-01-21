@@ -36,8 +36,13 @@ def get_demo_data(hdf5_dataset, demo_key):
     if 'obs/velocity' in demo_data and 'obs/acceleration' in demo_data and 'obs/yaw_rate' in demo_data:
         series = concat_obs_group(demo_data['obs'], feature_keys=['acceleration', 'velocity', 'yaw_rate'])
         return series
+    # Droid dataset structure
+    if 'obs/cartesian_positions' in demo_data and 'obs/gripper_states' in demo_data and 'obs/joint_states' in demo_data:
+        series = concat_obs_group(demo_data['obs'], feature_keys=['cartesian_positions', 'gripper_states', 'joint_states'])
+        return series
+    raise ValueError("Unknown dataset structure or missing expected keys.")
 
-def process_retrieval_results(episode_results, length = None, top_k=None, max_distance=None):
+def process_retrieval_results(episode_results, top_k=None, max_distance=None):
     episode_results.sort(key=lambda x: x['cost'])
     num_retrieved = len(episode_results)
     if not top_k:
@@ -78,9 +83,21 @@ def process_retrieval_results(episode_results, length = None, top_k=None, max_di
                 output[f"match_{i}"]['obs/yaw_rate'] = yaw_rate[result['start_idx']:result['end_idx']]
                 output[f"match_{i}"]['file_path'] = result['offline_file']
                 output[f"match_{i}"]['demo_key'] = result['demo_key']
-                output[f"match_{i}"]['lang_instruction'] = f.attrs.get('lang_instruction', 'No instruction available')
+                output[f"match_{i}"]['lang_instruction'] = f.attrs.get('language_instruction', 'No instruction available')
+            # Droid dataset structure
+            elif 'obs/cartesian_positions' in demo_data:
+                cartesian_positions = demo_data['obs/cartesian_positions'][:]
+                gripper_states = demo_data['obs/gripper_states'][:]
+                joint_states = demo_data['obs/joint_states'][:]
+                output[f"match_{i}"]['obs/cartesian_positions'] = cartesian_positions[result['start_idx']:result['end_idx']]
+                output[f"match_{i}"]['obs/gripper_states'] = gripper_states[result['start_idx']:result['end_idx']]
+                output[f"match_{i}"]['obs/joint_states'] = joint_states[result['start_idx']:result['end_idx']]
+                output[f"match_{i}"]['file_path'] = result['offline_file']
+                output[f"match_{i}"]['demo_key'] = result['demo_key']
+                output[f"match_{i}"]['lang_instruction'] = f.attrs.get('language_instruction', 'No instruction available')
+            else:
+                raise ValueError("Unknown dataset structure or missing expected keys.")
     return output
-
 
 def transform_series_to_text(series, sax_num_bins=26, dataset="libero"):
     """

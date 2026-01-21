@@ -226,3 +226,4 @@ prototype_strap_results_12.json
 data/evaluation_results/
 data/droid/*json
 *mp4
+*.pth

@@ -101,6 +101,11 @@ def process_target_data(target_data_file):
             # for nuscene dataset structure
             elif 'velocity' in obs and 'acceleration' in obs and 'yaw_rate' in obs:
                 all_data = concat_obs_group(obs, feature_keys=['velocity', 'acceleration', 'yaw_rate'])
+            # for droid dataset structure
+            elif 'cartesian_positions' in obs and 'gripper_states' in obs and 'joint_states' in obs:
+                all_data = concat_obs_group(obs, feature_keys=['cartesian_positions', 'gripper_states', 'joint_states'])
+            else:
+                raise ValueError("Unknown dataset structure or missing expected keys.")
             # Convert to list of 2D arrays for sampling
             maneuvers[i] = [all_data[j] for j in range(all_data.shape[0])]
             class_names[i] = task
@@ -120,5 +125,10 @@ def process_offline_data(offline_data):
             # for nuscene dataset structure
             elif 'velocity' in obs and 'acceleration' in obs and 'yaw_rate' in obs:
                 all_data = concat_obs_group(obs, feature_keys=['velocity', 'acceleration', 'yaw_rate'])
+            # for droid dataset structure
+            elif 'cartesian_positions' in obs and 'gripper_states' in obs and 'joint_states' in obs:
+                all_data = concat_obs_group(obs, feature_keys=['cartesian_positions', 'gripper_states', 'joint_states'])
+            else:
+                raise ValueError("Unknown dataset structure or missing expected keys.")
             target_segments_list[demo] = all_data.astype(np.float32)
     return target_segments_list

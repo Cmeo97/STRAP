@@ -10,6 +10,7 @@ import json
 from typing import List, Tuple, Dict, Any
 import random
 import time
+import yaml
 import argparse
 from tqdm import tqdm
 
@@ -32,13 +33,12 @@ from prototypical_networks.prototype_utils import (
 from benchmarking.benchmark_utils import process_retrieval_results
 
 # --- Configuration Constants ---
-N_DIM = 12              # Number of features
 FEATURE_SIZE = 512      # Output size of the learned embedding
 
 # Training Parameters
 K_SHOT = 7              # Number of support examples per class
 N_QUERY = 3             # Number of query examples per class
-N_EPISODES = 400        # Total training episodes
+N_EPISODES = 500        # Total training episodes
 
 # --- Training Loop ---
 def train_robust_network(encoder, maneuver_data):
@@ -122,12 +122,11 @@ def get_prototypes(encoder, reference_maneuvers):
         prototypes[class_id] = torch.stack(resized_embeddings).mean(dim=0)
     return prototypes
 
-def prototype_retrieval(encoder, prototypes, offline_data_list, output_path, episode_names, thresholds):
+def prototype_retrieval(encoder, prototypes, offline_data_list, output_path, episode_names, TOP_K=100):
     device = next(encoder.parameters()).device
     with h5py.File(output_path, 'w') as outfile:
         results = outfile.create_group('results')
         for class_id, proto_seq in prototypes.items():
-            episode_threshold = thresholds[class_id]
             episode_key = episode_names[class_id]
             episode = results.create_group(episode_key)
             episode_results = []
@@ -141,15 +140,14 @@ def prototype_retrieval(encoder, prototypes, offline_data_list, output_path, epi
                     
                     # Numba DTW handles the different lengths of proto vs scene automatically
                     match = retrieve_maneuver_dtw(proto_seq.cpu().numpy(), scene_features.cpu().numpy())
-                    if match['cost'] < episode_threshold:
-                        episode_results.append({
-                            'cost': match['cost'],
-                            'start_idx': match['start_idx'],
-                            'end_idx': match['end_idx'],
-                            'demo_key': demo_key,
-                            'offline_file': offline_file
-                        })
-            processed_results = process_retrieval_results(episode_results, top_k=100)
+                    episode_results.append({
+                        'cost': match['cost'],
+                        'start_idx': match['start_idx'],
+                        'end_idx': match['end_idx'],
+                        'demo_key': demo_key,
+                        'offline_file': offline_file
+                    })
+            processed_results = process_retrieval_results(episode_results, top_k=TOP_K)
             for match_key, data in processed_results.items():
                 match_group = episode.create_group(match_key)
                 match_group.attrs['ep_meta'] = json.dumps({
@@ -161,23 +159,35 @@ def prototype_retrieval(encoder, prototypes, offline_data_list, output_path, epi
                     if data_key not in ['file_path', 'demo_key', 'lang_instruction']:
                         match_group.create_dataset(data_key, data=value)
 
-# --- Main Execution ---
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Prototype Libero Retrieval')
-    parser.add_argument('--reference_data', type=str, default='data/target_data/libero_target_dataset.hdf5',
-                        help='Path to the reference maneuver data HDF5 file')
-    parser.add_argument('--offline_data_dir', type=str, default='data/LIBERO/libero_90/*demo.hdf5',
-                        help='Path pattern to the offline data HDF5 files')
-    parser.add_argument('--output_path', default='data/retrieval_results/libero_retrieval_results_prototype.hdf5',
-                        help='Saved file path')
-    parser.add_argument('--pretrained', action='store_true', default=True,
-                        help='Use pretrained model for retrieval without training')
-    parser.add_argument('--checkpoint_file', default='prototype_libero_model.pth')
-    
+    parser = argparse.ArgumentParser('Prototype-based Maneuver Retrieval')
+    parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file.')
+    parser.add_argument('--dataset_type', default='droid', choices=['libero', 'nuscene', 'droid'], 
+                       help='Type of dataset to use.')
+    parser.add_argument('--pretrained', default=False, action='store_true', help='Use pretrained model for retrieval.')
     args = parser.parse_args()
-    
-    reference_maneuver_data, episode_names = process_target_data(args.reference_data)
+    config = yaml.safe_load(open(args.config, 'r'))
+
+    if args.dataset_type == 'libero':
+        target_data = config['dataset_paths']['libero_target']
+        offline_data_dir = config['dataset_paths']['libero_offline']
+        retrieved_output = os.path.join(config['retrieval_paths'], 'libero_retrieval_results_prototype.hdf5')
+        checkpoint_name = config['prototype_ckpt_paths']['libero']
+    elif args.dataset_type == 'nuscene':
+        target_data = config['dataset_paths']['nuscene_target']
+        offline_data_dir = config['dataset_paths']['nuscene_offline']
+        retrieved_output = os.path.join(config['retrieval_paths'], 'nuscene_retrieval_results_prototype.hdf5')
+        checkpoint_name = config['prototype_ckpt_paths']['nuscene']
+    elif args.dataset_type == 'droid':
+        target_data = config['dataset_paths']['droid_target']
+        offline_data_dir = config['dataset_paths']['droid_offline']
+        retrieved_output = os.path.join(config['retrieval_paths'], 'droid_retrieval_results_prototype.hdf5')
+        checkpoint_name = config['prototype_ckpt_paths']['droid']
+    else:
+        raise ValueError("Unsupported dataset type!")
+
+    os.makedirs(os.path.dirname(retrieved_output), exist_ok=True)    
+    reference_maneuver_data, episode_names = process_target_data(target_data)
     N_DIM =reference_maneuver_data[0][0].shape[-1]
     N_CLASSES = len(reference_maneuver_data)
     N_WAY = N_CLASSES//2  # Update N_WAY based on number of classes
@@ -191,20 +201,19 @@ if __name__ == '__main__':
         print(f"Total training time: {training_time:.2f} seconds.")
     
         # Save the trained model
-        torch.save(encoder.state_dict(), args.checkpoint_file)
-
+        torch.save(encoder.state_dict(), checkpoint_name)
     else:
         # load the trained model (for inference)
-        if not os.path.exists(args.checkpoint_file):
+        if not os.path.exists(checkpoint_name):
             raise ValueError("Checkpoint file not found!! Train the model first.")
-        encoder.load_state_dict(torch.load(args.checkpoint_file))
+        encoder.load_state_dict(torch.load(checkpoint_name))
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         encoder.to(device)
 
     encoder.eval()
     prototypes = get_prototypes(encoder, reference_maneuver_data)
-    episode_thresholds = calibrate_dtw_thresholds(encoder, prototypes, reference_maneuver_data, K_SHOT, std_mult=1.0)
+    #episode_thresholds = calibrate_dtw_thresholds(encoder, prototypes, reference_maneuver_data, K_SHOT, std_mult=1.0)
 
     # C. Retrieval
-    offline_data_list = glob.glob(args.offline_data_dir)
-    prototype_retrieval(encoder, prototypes, offline_data_list, args.output_path, episode_names, episode_thresholds)
+    offline_data_list = glob.glob(offline_data_dir)
+    prototype_retrieval(encoder, prototypes, offline_data_list, retrieved_output, episode_names, TOP_K=100)

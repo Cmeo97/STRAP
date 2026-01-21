@@ -3,6 +3,7 @@ import h5py
 import json
 import os
 import argparse
+import yaml
 from typing import List, Tuple, Dict, Any
 import random
 
@@ -51,32 +52,32 @@ def model(X_train, y_train, epochs=10, model_path='shapelet_model.json'):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Prototype Libero Retrieval')
-    parser.add_argument('--dataset', default='libero', choices=['libero', 'nuscene', 'droid'],
-                        help='Dataset to use for shapelet learning')
-    
-    parser.add_argument('--pretrained', action='store_true', default=False,
-                        help='Use pretrained model for retrieval without training')
-    parser.add_argument('--epochs', type=int, default=300,
-                        help='Number of epochs to train shapelet model if not using pretrained')
-    
+    parser = argparse.ArgumentParser('Shapelet-based Maneuver Retrieval')
+    parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file.')
+    parser.add_argument('--dataset_type', default='droid', choices=['libero', 'nuscene', 'droid'], 
+                       help='Type of dataset to use.')
+    parser.add_argument('--epochs', type=int, default=250, help='Number of training epochs for shapelet model.')
+    parser.add_argument('--pretrained', default=False, action='store_true', help='Use pretrained model for retrieval.')
     args = parser.parse_args()
+    config = yaml.safe_load(open(args.config, 'r'))
 
-    if args.dataset == 'libero':
-        target_data = 'data/target_data/libero_target_dataset.hdf5'
-        offline_data_dir = 'data/LIBERO/libero_90/*demo.hdf5'
-        output_path = 'data/retrieval_results/libero_retrieval_results_shapelet.hdf5'
-        model_path = 'shapelet_libero_model.json'
-    elif args.dataset == 'nuscene':
-        target_data = 'data/target_data/nuscene_target_dataset.hdf5'
-        offline_data_dir = 'data/nuscene/*.hdf5'
-        output_path = 'data/retrieval_results/nuscene_retrieval_results_shapelet.hdf5'
-        model_path = 'shapelet_nuscene_model.json'
-    elif args.dataset == 'droid':
-        target_data = 'data/target_data/droid_target_dataset.hdf5'
-        offline_data_dir = 'data/droid/droid_dataset/*.hdf5'
-        output_path = 'data/retrieval_results/droid_retrieval_results_shapelet.hdf5'
-        model_path = 'shapelet_droid_model.json'
+    if args.dataset_type == 'libero':
+        target_data = config['dataset_paths']['libero_target']
+        offline_data_dir = config['dataset_paths']['libero_offline']
+        retrieved_output = os.path.join(config['retrieval_paths'], 'libero_retrieval_results_shapelet.hdf5')
+        checkpoint_name = config['shapelet_ckpt_paths']['libero']
+    elif args.dataset_type == 'nuscene':
+        target_data = config['dataset_paths']['nuscene_target']
+        offline_data_dir = config['dataset_paths']['nuscene_offline']
+        retrieved_output = os.path.join(config['retrieval_paths'], 'nuscene_retrieval_results_shapelet.hdf5')
+        checkpoint_name = config['shapelet_ckpt_paths']['nuscene']
+    elif args.dataset_type == 'droid':
+        target_data = config['dataset_paths']['droid_target']
+        offline_data_dir = config['dataset_paths']['droid_offline']
+        retrieved_output = os.path.join(config['retrieval_paths'], 'droid_retrieval_results_shapelet.hdf5')
+        checkpoint_name = config['shapelet_ckpt_paths']['droid']
+    else:
+        raise ValueError("Unsupported dataset type!")
     
     reference_maneuver_data, episode_names = process_target_data(target_data)
     N_DIM =reference_maneuver_data[0][0].shape[-1]
@@ -89,7 +90,7 @@ if __name__ == "__main__":
             for maneuver in reference_maneuver_data[i]:
                 X_train.append(maneuver)
         X_train = to_time_series_dataset(X_train)
-        shp_clf = model(X_train, Y_train, epochs=args.epochs, model_path=model_path)
+        shp_clf = model(X_train, Y_train, epochs=args.epochs, model_path=checkpoint_name)
     else:
-        shp_clf = LearningShapelets.from_json(model_path)
+        shp_clf = LearningShapelets.from_json(checkpoint_name)
 
