@@ -9,6 +9,14 @@ import numpy as np
 from benchmarking.benchmark_eval_metrics import UnsupervisedRetrievalEvaluator
 from benchmarking.benchmark_utils import concat_obs_group
 
+def _get_feature_keys_from_group(group):
+    if "ee_pos" in group:
+        return ["ee_pos", "gripper_states", "joint_states"]
+    elif "velocity" in group:
+        return ["velocity", "acceleration", "yaw_rate"]
+    else:
+        return None
+
 def load_reference_hdf5(path: str) -> Dict[str, np.ndarray]:
     """
     Load reference data. Each episode is mapped to its observed feature concatenation.
@@ -17,18 +25,14 @@ def load_reference_hdf5(path: str) -> Dict[str, np.ndarray]:
     """
     out = {}
     with h5py.File(path, "r") as f:
-        for episode in f.keys():
-            episode_data = f[episode]
-            # libero dataset structure
-            if "obs/ee_pos" in episode_data:
-                feature_keys = ["ee_pos", "gripper_states", "joint_states"]
-            # nuscene dataset structure
-            elif "obs/velocity" in episode_data:
-                feature_keys = ["velocity", "acceleration", "yaw_rate"]
-            data = concat_obs_group(episode_data["obs"], feature_keys=feature_keys)
-            out[episode] = data
+        for episode, episode_data in f.items():
+            feature_keys = _get_feature_keys_from_group(episode_data.get("obs", episode_data))
+            if feature_keys is None:
+                raise RuntimeError(
+                    f"Episode '{episode}' does not contain known observation keys ('obs/ee_pos' or 'obs/velocity')."
+                )
+            out[episode] = concat_obs_group(episode_data["obs"], feature_keys=feature_keys)
     return out
-
 
 def load_retrieved_hdf5(path: str) -> Dict[str, np.ndarray]:
     """
@@ -39,23 +43,35 @@ def load_retrieved_hdf5(path: str) -> Dict[str, np.ndarray]:
     out = {}
     with h5py.File(path, "r") as f:
         results_group = f["results"]
-        for episode in results_group:
+        for episode, episode_group in results_group.items():
             matches = []
-            for match_key in sorted(results_group[episode].keys()):
+            # Determine feature_keys for this episode using the first available match
+            feature_keys = None
+            for match_key, match_group in episode_group.items():
+                if match_key.startswith("match_"):
+                    obs_group = match_group["obs"]
+                    feature_keys = _get_feature_keys_from_group(obs_group)
+                    if feature_keys is not None:
+                        break
+            if feature_keys is None:
+                raise RuntimeError(
+                    f"Episode '{episode}' does not contain known observation keys ('ee_pos' or 'velocity') in any match obs group."
+                )
+            for match_key, match_group in episode_group.items():
                 if not match_key.startswith("match_"):
                     continue
-                obs = results_group[episode][match_key]["obs"]
-                match_arr = concat_obs_group(obs)
+                obs = match_group["obs"]
+                match_arr = concat_obs_group(obs, feature_keys=feature_keys)
                 if match_arr.size == 0:
                     continue
                 matches.append(match_arr)
             if not matches:
                 raise ValueError(f"No matches found for episode {episode}")
-
             # Pad variable-length episode matches to max length for stacking
             max_len = max(match.shape[0] for match in matches)
             padded_matches = [
-                np.pad(match, ((0, max_len - match.shape[0]), (0,0)), mode="constant") if match.shape[0] < max_len else match
+                np.pad(match, ((0, max_len - match.shape[0]), (0, 0)), mode="constant")
+                if match.shape[0] < max_len else match
                 for match in matches
             ]
             out[episode] = np.stack(padded_matches, axis=0)
