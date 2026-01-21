@@ -224,5 +224,5 @@ prototype_libero_model.pth
 .gitignore
 prototype_strap_results_12.json
 data/evaluation_results/
-*.json
+data/droid/*json
 *mp4
