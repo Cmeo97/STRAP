@@ -20,19 +20,53 @@ from benchmarking.benchmark_models import (
 from sentence_transformers import SentenceTransformer
 from tslearn.preprocessing import TimeSeriesScalerMinMax
 from tslearn.shapelets import LearningShapelets
-from benchmarking.benchmark_utils import get_demo_data, process_retrieval_results
+from benchmarking.benchmark_utils import get_demo_data, process_retrieval_results, transform_series_to_text
 from strap.utils.retrieval_utils import segment_trajectory_by_derivative, merge_short_segments
-
-def stumpy_dtaidistance_retrieval(target_path, offline_list, output_path, stumpy=True, dtaidistance=False, TOP_K=100, qwen_embedder=False, qwen_use_sax=False):
+from dotenv import load_dotenv
+load_dotenv()
+HF_TOKEN = os.getenv("HF_TOKEN")
+def stumpy_dtaidistance_retrieval(
+    target_path, 
+    offline_list, 
+    output_path, 
+    stumpy=False, 
+    dtaidistance=False, 
+    qwen_embedder=False, 
+    llama_embedder=False, 
+    gemma_embedder=False,
+    TOP_K=100, 
+    dataset="libero"
+):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    if qwen_embedder or qwen_use_sax:
-        qwen_embedder = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
+    embedder_model = None
+    if qwen_embedder:
+        embedder_model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
+    if llama_embedder:
+        embedder_model = SentenceTransformer("nvidia/llama-nemotron-embed-1b-v2", trust_remote_code=True)
+    if gemma_embedder:
+        embedder_model = SentenceTransformer("google/embeddinggemma-300m")
     with h5py.File(output_path, 'w') as outfile:
         results = outfile.create_group('results')
         with h5py.File(target_path, 'r') as f:
-            for episode_key in f.keys():
+            episodes = next(iter(f.keys()))
+            for episode_key in [episodes]:
                 episode = results.create_group(episode_key)
                 target_series = get_demo_data(f, episode_key)
+
+                # -----For LLM matching-----
+                if embedder_model:
+                    target_text = transform_series_to_text(target_series[0], dataset=dataset)
+                    query_prompt = (
+                        "Which multivariate SAX sequences are similar to this?\n"
+                        f"{target_text}"
+                    )
+                    if qwen_embedder:
+                        target_embeddings = embedder_model.encode(query_prompt, prompt_name="query")
+                    if llama_embedder:
+                        target_embeddings = embedder_model.encode_query(query_prompt, convert_to_tensor=True)
+                    if gemma_embedder:
+                        target_embeddings = embedder_model.encode(query_prompt)
+                # ----------------------------
                 
                 episode_results = []
                 for offline_file in tqdm(offline_list, desc=f"Stumpy/Dtaidistance -- Retrieving data for {episode_key}"):
@@ -44,8 +78,17 @@ def stumpy_dtaidistance_retrieval(target_path, offline_list, output_path, stumpy
                                  result = stumpy_single_matching(target_series[0], offline_series, top_k=1)
                             if dtaidistance:
                                  result = dtaidistance_single_matching(target_series[0], offline_series, top_k=1)
-                            if qwen_embedder or qwen_use_sax:
-                                 result = llm_matching(target_series, offline_series, top_k=1, embedder_model=qwen_embedder, use_sax=qwen_use_sax)
+                            if qwen_embedder or llama_embedder or gemma_embedder:
+                                 result = llm_matching(
+                                    target_embeddings, 
+                                    target_series[0], 
+                                    offline_series, 
+                                    top_k=1, 
+                                    embedder_model=embedder_model,
+                                    model_type="qwen" if qwen_embedder else "llama" if llama_embedder else "gemma",
+                                    max_windows=10,
+                                    dataset=dataset
+                                )
                             for match in result:
                                 if match:
                                     episode_results.append({
@@ -192,14 +235,16 @@ def benchmark_libero(args):
     #                               stumpy=True, dtaidistance=False)
     # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_dtaidistance.hdf5', 
     #                               stumpy=False, dtaidistance=True)
-    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_llm.hdf5', 
-    #                               stumpy=False, dtaidistance=False, qwen_embedder=True, qwen_use_sax=False)
-    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_llm_sax.hdf5', 
-    #
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_qwen.hdf5', 
+    #                               stumpy=False, dtaidistance=False, qwen_embedder=True, dataset="libero")
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_llama.hdf5',
+    #                               stumpy=False, dtaidistance=False, llama_embedder=True, dataset="libero")
+    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_gemma.hdf5',
+                                    stumpy=False, dtaidistance=False, gemma_embedder=True, dataset="libero")
     # load the pre-trained shapelet model
-    shapelet_model = LearningShapelets.from_json('shapelet_libero_model.json')
-    shaplet_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_shapelet.hdf5',
-                      shapelet_model, window_size=100, stride=30, TOP_K=100)
+    # shapelet_model = LearningShapelets.from_json('shapelet_libero_model.json')
+    # shaplet_retrieval(target_data_path, libero_90_list, f'{args.output_dir}/libero_retrieval_results_shapelet.hdf5',
+    #                   shapelet_model, window_size=100, stride=30, TOP_K=100)
     
     end_time = time.time()
     print(f"Total Benchmarking Time for Libero Dataset: {(end_time - start_time)/60:.2f} minutes.")
@@ -211,13 +256,19 @@ def benchmark_nuscene(args):
     
     start_time = time.time()
     # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_stumpy.hdf5', 
-    #                               stumpy=True, dtaidistance=False, TOP_K=20)
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_dtaidistance.hdf5',
-                                stumpy=False, dtaidistance=True, TOP_K=20)
+    #                               stumpy=True, dtaidistance=False, TOP_K=40)
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_dtaidistance.hdf5',
+    #                               stumpy=False, dtaidistance=True, TOP_K=40)
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_llm.hdf5',
+    #                               stumpy=False, dtaidistance=False, qwen_embedder=True, TOP_K=40, dataset="nuscene")
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_llama.hdf5',
+    #                               stumpy=False, dtaidistance=False, llama_embedder=True, TOP_K=40, dataset="nuscene")
+    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_gemma.hdf5',
+                                    stumpy=False, dtaidistance=False, gemma_embedder=True, TOP_K=40, dataset="nuscene")
     # load the pre-trained shapelet model
-    shapelet_model = LearningShapelets.from_json('shapelet_nuscene_model.json')
-    shaplet_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_shapelet.hdf5',
-                      shapelet_model, window_size=800, stride=200, TOP_K=20)
+    # shapelet_model = LearningShapelets.from_json('shapelet_nuscene_model.json')
+    # shaplet_retrieval(target_data_path, offline_list, f'{args.output_dir}/nuscene_retrieval_results_shapelet.hdf5',
+    #                   shapelet_model, window_size=800, stride=200, TOP_K=20)
     
     end_time = time.time()
     print(f"Total Benchmarking Time for Nuscene Dataset: {(end_time - start_time)/60:.2f} minutes.")

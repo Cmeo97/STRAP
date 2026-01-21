@@ -5,8 +5,6 @@ from string import ascii_uppercase
 from scipy.interpolate import interp1d
 from strap.configs.libero_file_functions import get_libero_lang_instruction
 
-# The 'ee_pos' key in the reference set corresponds to 'ee_pose'
-FEATURE_KEYS = ["ee_pos", "gripper_states", "joint_states"]
 
 def concat_obs_group(obs_group: h5py.Group, feature_keys=None) -> np.ndarray:
     """
@@ -15,8 +13,6 @@ def concat_obs_group(obs_group: h5py.Group, feature_keys=None) -> np.ndarray:
     Returns:
         (T, F_total)
     """
-    if feature_keys is None:
-        feature_keys = FEATURE_KEYS
     features = [obs_group[k][()] for k in feature_keys]
     return np.concatenate(features, axis=-1)
 
@@ -38,7 +34,7 @@ def get_demo_data(hdf5_dataset, demo_key):
         return series
     # Nuscene dataset structure
     if 'obs/velocity' in demo_data and 'obs/acceleration' in demo_data and 'obs/yaw_rate' in demo_data:
-        series = concat_obs_group(demo_data['obs'], feature_keys=['velocity', 'acceleration', 'yaw_rate'])
+        series = concat_obs_group(demo_data['obs'], feature_keys=['acceleration', 'velocity', 'yaw_rate'])
         return series
 
 def process_retrieval_results(episode_results, length = None, top_k=None, max_distance=None):
@@ -86,39 +82,57 @@ def process_retrieval_results(episode_results, length = None, top_k=None, max_di
     return output
 
 
-def transform_series_to_text(series, use_sax=False, sax_num_bins=26):
+def transform_series_to_text(series, sax_num_bins=26, dataset="libero"):
     """
     Transform a (seq_length, features) time series to a compact string representation.
-    For floats: feature_name: [float1, float2, ...]
-    For SAX:    feature_name: AABBCA...
+
+    Args:
+        series: np.ndarray of shape (seq_len, features)
+        sax_num_bins: number of bins to quantize into SAX symbols (default=26)
+        dataset: str, one of ["libero", "nuscene", "droid"]
+
+    Returns:
+        str: Compact text representation of the time-series, one line per feature.
     """
-    feature_names = [
-        "ee_pose_x", "ee_pose_y", "ee_pose_z",
-        "gripper_state_0", "gripper_state_1",
-        "joint_0", "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"
-    ]
+    # Feature names for each supported dataset
+    feature_sets = {
+        "libero": [
+            "ee_pose_x", "ee_pose_y", "ee_pose_z",
+            "gripper_state_0", "gripper_state_1",
+            "joint_0", "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6"
+        ],
+        "nuscene": [
+            "acceleration", "velocity", "yaw_rate"
+        ],
+        "droid": [
+            # Add DROID feature names here if known
+        ]
+    }
+
+    if len(feature_sets[dataset]) != series.shape[1]:
+        raise ValueError(f"Number of features in dataset {dataset} does not match the number of features in the series")
+    if dataset not in feature_sets:
+        raise ValueError(f"Dataset {dataset} not recognized. Choose from: {list(feature_sets.keys())}")
+
+    feature_names = feature_sets[dataset]
+
     series_t = series.T  # shape: (features, seq_len)
-    seq_len = series_t.shape[1]
     lines = []
-    if use_sax:
-        sax_symbols = ascii_uppercase[:sax_num_bins]
-        for i in range(series_t.shape[0]):
-            x = series_t[i]
-            x_mean = np.mean(x)
-            x_std = np.std(x)
-            if x_std == 0:
-                norm_x = np.zeros_like(x)
-            else:
-                norm_x = (x - x_mean) / x_std
-            # Define bin edges at quantiles, so bins have equal support in normal distribution
-            bin_edges = np.quantile(norm_x, np.linspace(0, 1, sax_num_bins + 1))
-            bin_edges = np.unique(bin_edges)
-            digitized = np.digitize(norm_x, bin_edges[1:-1], right=False)
-            symbols = [sax_symbols[idx] if idx < len(sax_symbols) else sax_symbols[-1] for idx in digitized]
-            values = "".join(symbols)
-            lines.append(f"{feature_names[i]}: {values}")
-    else:
-        for i in range(series_t.shape[0]):
-            vals = [float(f"{series_t[i, t]:.6f}") for t in range(seq_len)]
-            lines.append(f"{feature_names[i]}: {vals}")
+    sax_symbols = ascii_uppercase[:sax_num_bins]
+    for i in range(series_t.shape[0]):
+        x = series_t[i]
+        x_mean = np.mean(x)
+        x_std = np.std(x)
+        if x_std == 0:
+            norm_x = np.zeros_like(x)
+        else:
+            norm_x = (x - x_mean) / x_std
+        # Define bin edges at quantiles, so bins have equal support in normal distribution
+        bin_edges = np.quantile(norm_x, np.linspace(0, 1, sax_num_bins + 1))
+        bin_edges = np.unique(bin_edges)
+        digitized = np.digitize(norm_x, bin_edges[1:-1], right=False)
+        symbols = [sax_symbols[idx] if idx < len(sax_symbols) else sax_symbols[-1] for idx in digitized]
+        values = "".join(symbols)
+        fname = feature_names[i]
+        lines.append(f"{fname} [SAX Representation]: {values}")
     return "\n".join(lines)

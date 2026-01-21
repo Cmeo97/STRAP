@@ -107,52 +107,44 @@ def shaplet_matching(series, shapelet_model: LearningShapelets, window_size, str
         })
     return candidates
 
-def llm_matching(query, series, top_k=None, embedder_model=None, use_sax=False):
+def llm_matching(query_embedding, query, series, top_k=None, embedder_model=None, model_type="qwen", max_windows=10, dataset="libero"):
     """
-    Perform sliding window over `series` (the document), transform each window to text for embedding,
-    and match with the query's embedding. Returns a list of [cost, start_idx, end_idx] for the top_k best matches.
-    The start_idx and end_idx returned are from the series, that is, the indices in the series that are cutoff by the sliding window.
+    Sliding-window matching with dynamically adapted stride so that
+    at most `max_windows` windows are evaluated.
     """
-    print(query.shape)
-    print(series.shape)
     query_length = query.shape[0]
-    total_windows = series.shape[0] - query_length + 1
-    if query_length > series.shape[0] or total_windows <= 0:
+    series_length = series.shape[0]
+
+    # Correct window count formula
+    max_possible_windows = series_length - query_length + 1
+    if query_length > series_length or max_possible_windows <= 0:
         return []
 
-    print(f"Query length: {query_length}, Total windows: {total_windows}")
-    query_text = [transform_series_to_text(query[i], use_sax=use_sax) for i in range(query.shape[0])]
-    print(f"Query text: {query_text}")
-    all_series = [transform_series_to_text(series[i:i+query_length], use_sax=use_sax) for i in range(total_windows)]
-    print(f"All series: {all_series}")
-    
-    print(f"Encoding query...")
-    query_embedding = embedder_model.encode([query_text], prompt_name="query")      # shape (1, D)
-    print(f"Query embedding: {query_embedding}")
+    stride = int(np.ceil(max(1, max_possible_windows / max_windows)))
 
-    print(f"Encoding all series...")
-    all_series_embeddings = embedder_model.encode(all_series)  # shape (N, D)
-    print(f"All series embeddings: {all_series_embeddings}")
+    start_indices = list(range(0, max_possible_windows, stride))
+    start_indices = start_indices[:max_windows]
 
-    print(f"Matching query and all series...")
-    cosine_sim_matrix = embedder_model.similarity(query_embedding, all_series_embeddings)  # shape (1, N)
-    similarities = cosine_sim_matrix[0]  # shape (N,)
-    costs = 1.0 - similarities  # shape (N,)
-    print(f"Costs: {costs}")
+    all_series = [transform_series_to_text(series[i:i + query_length], dataset=dataset) for i in start_indices]
+    if model_type == "qwen" or model_type == "gemma":
+        all_series_embeddings = embedder_model.encode(all_series)  # (W, D)
+    elif model_type == "llama":
+        all_series_embeddings = embedder_model.encode_document(all_series, convert_to_tensor=True)  # (W, D)
 
-    window_indices = [(i, i + query_length) for i in range(total_windows)]
-    print(f"Window indices: {window_indices}")
+    cosine_sim_matrix = embedder_model.similarity(query_embedding, all_series_embeddings)  # (1, W)
+    similarities = cosine_sim_matrix[0]
+    costs = 1.0 - similarities
 
-    # Select the top_k lowest costs (= highest cosine similarities)
+    window_indices = [(i, i + query_length) for i in start_indices]
+
     if top_k is None or top_k > len(costs):
         top_k = len(costs)
+
     top_k_indices = np.argsort(costs)[:top_k]
-    print(f"Top k indices: {top_k_indices}")
 
     results = []
     for idx in top_k_indices:
         start_idx, end_idx = window_indices[idx]
-        cost = costs[idx]
-        results.append([cost, start_idx, end_idx])
-    print(f"Results: {results}")
+        results.append([costs[idx], start_idx, end_idx])
+    print("Finished results...")
     return results
