@@ -22,9 +22,8 @@ from tslearn.preprocessing import TimeSeriesScalerMinMax
 from tslearn.shapelets import LearningShapelets
 from benchmarking.benchmark_utils import get_demo_data, process_retrieval_results, transform_series_to_text
 from strap.utils.retrieval_utils import segment_trajectory_by_derivative, merge_short_segments
-from dotenv import load_dotenv
-load_dotenv()
-HF_TOKEN = os.getenv("HF_TOKEN")
+
+
 def stumpy_dtaidistance_retrieval(
     target_path, 
     offline_list, 
