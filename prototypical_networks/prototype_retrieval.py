@@ -171,17 +171,17 @@ if __name__ == '__main__':
     if args.dataset_type == 'libero':
         target_data = config['dataset_paths']['libero_target']
         offline_data_dir = config['dataset_paths']['libero_offline']
-        retrieved_output = os.path.join(config['retrieval_paths'], 'libero_retrieval_results_prototype.hdf5')
+        retrieved_output = os.path.join(config['retrieval_paths']['libero'], 'libero_retrieval_results_prototype.hdf5')
         checkpoint_name = config['prototype_ckpt_paths']['libero']
     elif args.dataset_type == 'nuscene':
         target_data = config['dataset_paths']['nuscene_target']
         offline_data_dir = config['dataset_paths']['nuscene_offline']
-        retrieved_output = os.path.join(config['retrieval_paths'], 'nuscene_retrieval_results_prototype.hdf5')
+        retrieved_output = os.path.join(config['retrieval_paths']['nuscene'], 'nuscene_retrieval_results_prototype.hdf5')
         checkpoint_name = config['prototype_ckpt_paths']['nuscene']
     elif args.dataset_type == 'droid':
         target_data = config['dataset_paths']['droid_target']
         offline_data_dir = config['dataset_paths']['droid_offline']
-        retrieved_output = os.path.join(config['retrieval_paths'], 'droid_retrieval_results_prototype.hdf5')
+        retrieved_output = os.path.join(config['retrieval_paths']['droid'], 'droid_retrieval_results_prototype.hdf5')
         checkpoint_name = config['prototype_ckpt_paths']['droid']
     else:
         raise ValueError("Unsupported dataset type!")

@@ -224,28 +224,31 @@ def benchmark_libero(config):
     target_data_path = config['dataset_paths']['libero_target']
     libero_90_dir = config['dataset_paths']['libero_offline']
     libero_10_dir = config['dataset_paths']['libero_10']
+    retrieval_path = config['retrieval_paths']['libero']
     libero_10_list = glob.glob(libero_10_dir)
     libero_90_list = glob.glob(libero_90_dir)
     if len(libero_90_list) == 0 or len(libero_10_list) == 0:
         raise ValueError("No offline data files found for Libero dataset.")
     
+    
+    os.makedirs(retrieval_path, exist_ok=True)
     start_time = time.time()
-    modified_strap_retrieval(libero_10_list, libero_90_list, f"{config['retrieval_paths']}/libero_retrieval_results_modified_strap.hdf5", 
+    modified_strap_retrieval(libero_10_list, libero_90_list, f"{retrieval_path}/libero_retrieval_results_modified_strap.hdf5", 
                              min_length=60)
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{config['retrieval_paths']}/libero_retrieval_results_stumpy.hdf5", 
+    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_stumpy.hdf5", 
                                   stumpy=True)
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{config['retrieval_paths']}/libero_retrieval_results_dtaidistance.hdf5", 
+    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_dtaidistance.hdf5", 
                                   dtaidistance=True)
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{config['retrieval_paths']}/libero_retrieval_results_qwen.hdf5", 
+    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_qwen.hdf5", 
                                   qwen_embedder=True, dataset="libero")
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{config['retrieval_paths']}/libero_retrieval_results_llama.hdf5",
+    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_llama.hdf5",
                                   llama_embedder=True, dataset="libero")
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{config['retrieval_paths']}/libero_retrieval_results_gemma.hdf5",
+    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_gemma.hdf5",
                                   gemma_embedder=True, dataset="libero")
     
     # load the pre-trained shapelet model
     shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['libero'])
-    shaplet_retrieval(target_data_path, libero_90_list, f"{config['retrieval_paths']}/libero_retrieval_results_shapelet.hdf5",
+    shaplet_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_shapelet.hdf5",
                       shapelet_model, window_size=100, stride=30, TOP_K=100)
     
     end_time = time.time()
@@ -254,24 +257,26 @@ def benchmark_libero(config):
 def benchmark_nuscene(config):
     target_data_path = config['dataset_paths']['nuscene_target']
     offline_data_dir = config['dataset_paths']['nuscene_offline']
+    retrieval_path = config['retrieval_paths']['nuscene']
     offline_list = glob.glob(offline_data_dir)
     if len(offline_list) == 0:
         raise ValueError("No offline data files found for Nuscene dataset.")
     
+    os.makedirs(retrieval_path, exist_ok=True)
     start_time = time.time()
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/nuscene_retrieval_results_stumpy.hdf5", 
+    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_stumpy.hdf5", 
                                   stumpy=True, TOP_K=40)
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/nuscene_retrieval_results_dtaidistance.hdf5",
+    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_dtaidistance.hdf5",
                                   dtaidistance=True, TOP_K=40)
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/nuscene_retrieval_results_llm.hdf5",
+    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_llm.hdf5",
                                   qwen_embedder=True, TOP_K=40, dataset="nuscene")
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/nuscene_retrieval_results_llama.hdf5",
+    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_llama.hdf5",
                                   llama_embedder=True, TOP_K=40, dataset="nuscene")
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/nuscene_retrieval_results_gemma.hdf5",
+    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_gemma.hdf5",
                                   gemma_embedder=True, TOP_K=40, dataset="nuscene")
     # load the pre-trained shapelet model
     shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['nuscene'])
-    shaplet_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/nuscene_retrieval_results_shapelet.hdf5",
+    shaplet_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_shapelet.hdf5",
                       shapelet_model, window_size=800, stride=200, TOP_K=20)
     
     end_time = time.time()
@@ -282,23 +287,25 @@ def benchmark_droid(config):
     target_data_path = config['dataset_paths']['droid_target']
     offline_data_dir = config['dataset_paths']['droid_offline']
     offline_list = glob.glob(offline_data_dir)
+    retrieval_path = config['retrieval_paths']['droid']
     if len(offline_list) == 0:
         raise ValueError("No offline data files found for Droid dataset.")
     
+    os.makedirs(retrieval_path, exist_ok=True)
     start_time = time.time()
-    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/droid_retrieval_results_stumpy.hdf5", 
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_stumpy.hdf5", 
     #                               stumpy=True, TOP_K=40)
-    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/droid_retrieval_results_dtaidistance.hdf5",
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_dtaidistance.hdf5",
     #                               dtaidistance=True, TOP_K=40)
-    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/droid_retrieval_results_llm.hdf5",
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_llm.hdf5",
     #                               qwen_embedder=True, TOP_K=40, dataset="droid")
-    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/droid_retrieval_results_llama.hdf5",
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_llama.hdf5",
     #                               llama_embedder=True, TOP_K=40, dataset="droid")
-    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/droid_retrieval_results_gemma.hdf5",
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_gemma.hdf5",
     #                               gemma_embedder=True, TOP_K=40, dataset="droid")
     # # load the pre-trained shapelet model
     shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['droid'])
-    shaplet_retrieval(target_data_path, offline_list, f"{config['retrieval_paths']}/droid_retrieval_results_shapelet.hdf5",
+    shaplet_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_shapelet.hdf5",
                       shapelet_model, window_size=170, stride=20, TOP_K=20)
     
     end_time = time.time()
@@ -310,9 +317,7 @@ if __name__ == "__main__":
                         type=str, help='Path to config file.')
     args = parser.parse_args()
     config  = yaml.safe_load(open(args.config, 'r'))
-    
-    os.makedirs(config['retrieval_paths'], exist_ok=True)
-    
+        
     #benchmark_libero(config)
     #benchmark_nuscene(config)
     benchmark_droid(config)

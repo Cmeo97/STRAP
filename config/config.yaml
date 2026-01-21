@@ -17,4 +17,7 @@ shapelet_ckpt_paths:
   nuscene: "checkpoints/nuscene_shapelet_model.json"
   droid: "checkpoints/droid_shapelet_model.json"
 
-retrieval_paths: "data/retrieval_results"
+retrieval_paths:
+  libero: "data/retrieval_results/libero"
+  nuscene: "data/retrieval_results/nuscene"
+  droid: "data/retrieval_results/droid"
