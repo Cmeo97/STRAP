@@ -5,6 +5,7 @@ from typing import Dict, List, Any
 from tqdm.auto import tqdm
 import h5py
 import numpy as np
+import yaml
 
 from benchmarking.benchmark_eval_metrics import UnsupervisedRetrievalEvaluator
 from benchmarking.benchmark_utils import concat_obs_group
@@ -14,6 +15,8 @@ def _get_feature_keys_from_group(group):
         return ["ee_pos", "gripper_states", "joint_states"]
     elif "velocity" in group:
         return ["velocity", "acceleration", "yaw_rate"]
+    elif "cartesian_positions" in group:
+        return ["cartesian_positions", "gripper_states", "joint_states"]
     else:
         return None
 
@@ -230,21 +233,17 @@ def run_evaluation(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", default='libero')
-    parser.add_argument("--metric", default="stumpy")
-    parser.add_argument("--retrieved_path", default="data/retrieval_results/")
-    parser.add_argument("--reference_path", default="data/target_data/")
-    parser.add_argument("--output_path", default="data/evaluation_results/")
+    parser.add_argument("--dataset", default='droid')
+    parser.add_argument("--metric", default="prototype")
     args = parser.parse_args()
 
-    target_path = os.path.join(
-        args.reference_path, f"{args.dataset}_target_dataset.hdf5"
-    )
+    config = yaml.safe_load(open('config/config.yaml', 'r'))
+
+    target_path = config['dataset_paths'][f'{args.dataset}'+'_target']
     retrieved_path = os.path.join(
-        args.retrieved_path, f"{args.dataset}_retrieval_results_{args.metric}.hdf5"
-    )
+        config['retrieval_paths'][args.dataset], f'{args.dataset}_retrieval_results_{args.metric}.hdf5')
     output_json = os.path.join(
-        args.output_path, f"{args.dataset}_retrieval_evaluation_{args.metric}.json"
+        config['evaluation_paths'][args.dataset], f"{args.dataset}_retrieval_evaluation_{args.metric}.json"
     )
     os.makedirs(os.path.dirname(output_json), exist_ok=True)
 

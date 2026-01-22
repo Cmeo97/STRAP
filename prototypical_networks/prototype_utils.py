@@ -58,10 +58,10 @@ def retrieve_maneuver_dtw(prototype_seq, scene_embeddings):
     # 1. Calculate Pairwise Distances (PyTorch is faster for this matrix math)
     # We use Squared Euclidean Distance
     distance_matrix = get_distance_matrix(prototype_seq, scene_embeddings)
-    accumulated_cost_matrix = compute_accumulated_cost_matrix_subsequence_dtw_standard(
+    accumulated_cost_matrix = compute_accumulated_cost_matrix_subsequence_dtw_21(
         distance_matrix
     )
-    path = compute_optimal_warping_path_subsequence_dtw_standard(accumulated_cost_matrix)
+    path = compute_optimal_warping_path_subsequence_dtw_21(accumulated_cost_matrix)
     start = path[0, 1]
     if start < 0:
         assert start == -1

@@ -21,3 +21,8 @@ retrieval_paths:
   libero: "data/retrieval_results/libero"
   nuscene: "data/retrieval_results/nuscene"
   droid: "data/retrieval_results/droid"
+
+evaluation_paths:
+  libero: "data/evaluation_results/libero"
+  nuscene: "data/evaluation_results/nuscene"
+  droid: "data/evaluation_results/droid"
