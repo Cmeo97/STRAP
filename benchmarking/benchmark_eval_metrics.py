@@ -4,8 +4,6 @@ from scipy.stats import wasserstein_distance
 from scipy.signal import correlate
 from scipy.spatial.distance import cdist
 from dtaidistance import dtw_ndim
-import os
-import matplotlib.pyplot as plt
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class UnsupervisedRetrievalEvaluator:
@@ -18,12 +16,11 @@ class UnsupervisedRetrievalEvaluator:
     reference: (N_ref, T, F)
     """
 
-    def __init__(self, retrieved: np.ndarray, reference: np.ndarray, viz_dir: str = None):
+    def __init__(self, retrieved: np.ndarray, reference: np.ndarray):
         """
         Args:
             retrieved (np.ndarray): (N_r, T, F)
             reference (np.ndarray): (N_ref, T, F)
-            viz_dir (str, optional): directory for distributional checker visualizations; can be None if not used
         """
         retrieved = np.asarray(retrieved, dtype=np.float64)
         reference = np.asarray(reference, dtype=np.float64)
@@ -39,7 +36,6 @@ class UnsupervisedRetrievalEvaluator:
 
         self.N_r, self.T, self.F = retrieved.shape
         self.N_ref = reference.shape[0]
-        self.viz_dir = viz_dir
 
     # ------------------------------------------------------------------
     # Helpers
@@ -68,14 +64,20 @@ class UnsupervisedRetrievalEvaluator:
         Operates on flattened samples:
         (N*T, F)
         """
-        r = self.retrieved.reshape(-1, self.F)
-        ref = self.reference.reshape(-1, self.F)
+        if self.N_r == 0 or self.N_ref == 0:
+            return 1e6  # Large finite value for plotting
+        
+        try:
+            r = self.retrieved.reshape(-1, self.F)
+            ref = self.reference.reshape(-1, self.F)
 
-        result = float(np.mean([
-            wasserstein_distance(r[:, f], ref[:, f])
-            for f in range(self.F)
-        ]))
-        return result
+            result = float(np.mean([
+                wasserstein_distance(r[:, f], ref[:, f])
+                for f in range(self.F)
+            ]))
+            return result
+        except Exception:
+            return 1e6  # Large finite value for plotting
 
     def dtw_nn(self) -> float:
         """
@@ -84,22 +86,28 @@ class UnsupervisedRetrievalEvaluator:
         For each retrieved trajectory, compute minimum DTW distance
         to any reference trajectory.
         """
-        dists = []
+        if self.N_r == 0 or self.N_ref == 0:
+            return 1e6  # Large finite value for plotting
+        
+        try:
+            dists = []
 
-        # Ensure contiguous float64 for C backend
-        reference = [np.ascontiguousarray(ref, dtype=np.float64) for ref in self.reference]
+            # Ensure contiguous float64 for C backend
+            reference = [np.ascontiguousarray(ref, dtype=np.float64) for ref in self.reference]
 
-        for r in self.retrieved:
-            r = np.ascontiguousarray(r, dtype=np.float64)
-            best = np.inf
-            for ref in reference:
-                d = dtw_ndim.distance_fast(r, ref)  # C optimization
-                if d < best:
-                    best = d
-            dists.append(best)
+            for r in self.retrieved:
+                r = np.ascontiguousarray(r, dtype=np.float64)
+                best = np.inf
+                for ref in reference:
+                    d = dtw_ndim.distance_fast(r, ref)  # C optimization
+                    if d < best:
+                        best = d
+                dists.append(best)
 
-        result = float(np.mean(dists))
-        return result
+            result = float(np.mean(dists))
+            return result
+        except Exception:
+            return 1e6  # Large finite value for plotting
 
 
     def spectral_wasserstein(self, eps: float = 1e-8) -> float:
@@ -108,49 +116,61 @@ class UnsupervisedRetrievalEvaluator:
 
         PSD computed per feature, averaged over dataset.
         """
-        def avg_psd(x: np.ndarray) -> np.ndarray:
-            # x: (N, T, F) -> (F, T)
-            fft = np.fft.fft(x, axis=1)
-            psd = np.abs(fft) ** 2
-            return psd.mean(axis=0).T
+        if self.N_r == 0 or self.N_ref == 0 or self.T == 0:
+            return 1e6  # Large finite value for plotting
+        
+        try:
+            def avg_psd(x: np.ndarray) -> np.ndarray:
+                # x: (N, T, F) -> (F, T)
+                fft = np.fft.fft(x, axis=1)
+                psd = np.abs(fft) ** 2
+                return psd.mean(axis=0).T
 
-        p_ret = avg_psd(self.retrieved)
-        p_ref = avg_psd(self.reference)
+            p_ret = avg_psd(self.retrieved)
+            p_ref = avg_psd(self.reference)
 
-        dists = []
-        for f in range(self.F):
-            p = p_ret[f]
-            q = p_ref[f]
+            dists = []
+            for f in range(self.F):
+                p = p_ret[f]
+                q = p_ref[f]
 
-            p = p / (p.sum() + eps)
-            q = q / (q.sum() + eps)
+                p = p / (p.sum() + eps)
+                q = q / (q.sum() + eps)
 
-            dists.append(wasserstein_distance(p, q))
+                dists.append(wasserstein_distance(p, q))
 
-        result = float(np.mean(dists))
-        return result
+            result = float(np.mean(dists))
+            return result
+        except Exception:
+            return 1e6  # Large finite value for plotting
 
     def temporal_correlation(self) -> float:
         """
         Max normalized cross-correlation, averaged over
         all (retrieved, reference, feature) tuples.
         """
-        vals = []
+        if self.N_r == 0 or self.N_ref == 0 or self.T == 0:
+            return 0.0  # No correlation
+        
+        try:
+            vals = []
 
-        for f in range(self.F):
-            for r in self.retrieved:
-                r_f = r[:, f]
-                r_norm = np.linalg.norm(r_f) + 1e-8
+            for f in range(self.F):
+                for r in self.retrieved:
+                    r_f = r[:, f]
+                    r_norm = np.linalg.norm(r_f) + 1e-8
 
-                for ref in self.reference:
-                    ref_f = ref[:, f]
-                    ref_norm = np.linalg.norm(ref_f) + 1e-8
+                    for ref in self.reference:
+                        ref_f = ref[:, f]
+                        ref_norm = np.linalg.norm(ref_f) + 1e-8
 
-                    c = correlate(r_f, ref_f, mode="valid")
-                    vals.append(np.max(c) / (r_norm * ref_norm))
+                        c = correlate(r_f, ref_f, mode="valid")
+                        vals.append(np.max(c) / (r_norm * ref_norm))
 
-        result = float(np.mean(vals))
-        return result
+            result = float(np.mean(vals))
+            return result
+        except Exception:
+            return 0.0  # No correlation
 
     def distributional_coverage(self, k: int = 5) -> Dict[str, float]:
         """
@@ -163,39 +183,48 @@ class UnsupervisedRetrievalEvaluator:
 
         Operates in flattened feature space.
         """
-        r = self._flatten(self.retrieved)   # (M, D)
-        ref = self._flatten(self.reference) # (N, D)
+        if self.N_r == 0 or self.N_ref == 0:
+            return {"density": 0.0, "coverage": 0.0}
+        
+        if self.N_ref < k + 1:
+            return {"density": 0.0, "coverage": 0.0}
+        
+        try:
+            r = self._flatten(self.retrieved)   # (M, D)
+            ref = self._flatten(self.reference) # (N, D)
 
-        M, N = r.shape[0], ref.shape[0]
+            M, N = r.shape[0], ref.shape[0]
 
-        # --- k-NN radii for reference samples ---
-        d_ref_ref = cdist(ref, ref)
-        np.fill_diagonal(d_ref_ref, np.inf)
-        ref_radii = np.partition(d_ref_ref, k, axis=1)[:, k]  # (N,)
+            # --- k-NN radii for reference samples ---
+            d_ref_ref = cdist(ref, ref)
+            np.fill_diagonal(d_ref_ref, np.inf)
+            ref_radii = np.partition(d_ref_ref, k, axis=1)[:, k]  # (N,)
 
-        # --- cross distances ---
-        d_ref_r = cdist(ref, r)  # (N, M)
+            # --- cross distances ---
+            d_ref_r = cdist(ref, r)  # (N, M)
 
-        # =====================
-        # Density
-        # =====================
-        # For each retrieved sample, count how many real neighborhoods contain it
-        density = (
-            (d_ref_r <= ref_radii[:, None]).sum(axis=0).mean() / k
-        )
+            # =====================
+            # Density
+            # =====================
+            # For each retrieved sample, count how many real neighborhoods contain it
+            density = (
+                (d_ref_r <= ref_radii[:, None]).sum(axis=0).mean() / k
+            )
 
-        # =====================
-        # Coverage
-        # =====================
-        # Fraction of real samples that lie in at least one retrieved neighborhood
+            # =====================
+            # Coverage
+            # =====================
+            # Fraction of real samples that lie in at least one retrieved neighborhood
 
-        coverage = (d_ref_r <= ref_radii[:, None]).any(axis=1).mean()
+            coverage = (d_ref_r <= ref_radii[:, None]).any(axis=1).mean()
 
 
-        return {
-            "density": float(density),
-            "coverage": float(coverage),
-        }
+            return {
+                "density": float(density),
+                "coverage": float(coverage),
+            }
+        except Exception:
+            return {"density": 0.0, "coverage": 0.0}
 
     def diversity_icd(
         self,
@@ -215,69 +244,25 @@ class UnsupervisedRetrievalEvaluator:
         Returns:
             Mean pairwise DTW distance.
         """
-        X = np.asarray(self.retrieved, dtype=np.float64)
+        if self.N_r < 2:
+            return 0.0  # No diversity with < 2 samples
+        
+        try:
+            X = np.asarray(self.retrieved, dtype=np.float64)
 
-        # Compute full distance matrix (NxN)
-        D = dtw_ndim.distance_matrix_fast(
-            X,
-            window=window,
-        )
+            # Compute full distance matrix (NxN)
+            D = dtw_ndim.distance_matrix_fast(
+                X,
+                window=window,
+            )
 
-        # Extract upper triangle without diagonal
-        iu = np.triu_indices(D.shape[0], k=1)
-        result = float(D[iu].mean())
+            # Extract upper triangle without diagonal
+            iu = np.triu_indices(D.shape[0], k=1)
+            result = float(D[iu].mean())
 
-        return result
-
-    def distributional_checker(self, dataset: str = None, method: str = None, task: str = None):
-        """
-        Generates a visualization of the flattened feature marginals
-        comparing retrieved and reference distributions.
-        The visualization is output in visualization/[dataset]/[method]/[task].png
-        Args:
-            dataset (str): dataset name (e.g., 'libero', 'nuscene')
-            method (str): method name (e.g., 'stumpy', 'dtaidistance')
-            task (str): task/episode name to use as filename in output path.
-        """
-
-        if dataset is None or method is None or task is None:
-            raise ValueError("dataset, method, and task must be specified for distributional_checker")
-
-        # Construct output path: visualization/[dataset]/[method]/[task].png
-        output_dir = os.path.join("visualization", dataset, method)
-        os.makedirs(output_dir, exist_ok=True)
-        out_path = os.path.join(output_dir, f"{task}.png")
-
-        r = self._flatten_2d(self.retrieved)  # (N_r * T, F)
-        ref = self._flatten_2d(self.reference)  # (N_ref * T, F)
-
-        F = r.shape[1]
-        selected_feats = list(range(F))
-
-        # Set up a 4 by 3 grid
-        n_rows, n_cols = 4, 3
-        total_plots = n_rows * n_cols
-        # Cap at F features shown, but still set grid up to 3x4 in any case
-        feats_to_show = min(F, total_plots)
-
-        fig, axs = plt.subplots(n_rows, n_cols, figsize=(16, 12))
-        axs = axs.flatten()
-
-        for idx in range(total_plots):
-            ax = axs[idx]
-            if idx < F:
-                f = selected_feats[idx]
-                ax.hist(ref[:, f], bins=80, alpha=0.65, color="tab:blue", label="Reference", density=True)
-                ax.hist(r[:, f], bins=80, alpha=0.65, color="tab:orange", label="Retrieved", density=True)
-                ax.set_title(f"Feature {f} marginal")
-                ax.legend()
-            else:
-                # Hide unused subplot axes
-                ax.axis('off')
-        plt.tight_layout()
-
-        plt.savefig(out_path)
-        plt.close()
+            return result
+        except Exception:
+            return 0.0  # No diversity
 
     # ------------------------------------------------------------------
     # Aggregate
