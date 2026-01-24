@@ -11,6 +11,7 @@ from benchmarking.benchmark_utils import transform_series_to_text
 from tslearn.preprocessing import TimeSeriesScalerMinMax
 from tslearn.shapelets import LearningShapelets
 stumpy.config.STUMPY_EXCL_ZONE_DENOM = np.inf
+from momentfm import MOMENTPipeline
 
 def stumpy_single_matching(query, series, top_k=None, dist_thres=None):
     if query.shape[0] > query.shape[1]:
@@ -148,3 +149,24 @@ def llm_matching(query_embedding, query, series, top_k=None, embedder_model=None
         results.append([costs[idx], start_idx, end_idx])
     print("Finished results...")
     return results
+
+def momentfm_matching(query, series, momentfm_model: MOMENTPipeline, stride):
+    L, D = series.shape
+    window_size = query.shape[0]
+    window_starts = np.arange(0, L - window_size + 1, stride)
+    
+    candidates = []
+    for i in range(0, len(window_starts)):
+        start_frame = int(window_starts[i])
+        end_frame = int(start_frame + window_size)
+        window = series[start_frame:end_frame, :]
+
+        series_embedding = momentfm_model.encode(window)
+
+        candidates.append({
+            "cost": distance,
+            "start_idx": start_frame,
+            "end_idx": end_frame,
+            "demo_key": None,
+        })
+    return candidates
