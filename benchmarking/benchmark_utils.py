@@ -153,3 +153,23 @@ def transform_series_to_text(series, sax_num_bins=26, dataset="libero"):
         fname = feature_names[i]
         lines.append(f"{fname} [SAX Representation]: {values}")
     return "\n".join(lines)
+
+def pad_zeros_to_length(series, MOMENT_LENGTH=512):
+    """
+    Pad a time series with zeros to reach the target length.
+
+    Args:
+        series: np.ndarray of shape (seq_length, features)
+        MOMENT_LENGTH: int, desired sequence length after padding
+
+    Returns:
+        np.ndarray of shape (MOMENT_LENGTH, features)
+    """
+    current_length = series.shape[0]
+    if current_length >= MOMENT_LENGTH:
+        return resize_scipy(series, MOMENT_LENGTH)
+    padding_length = MOMENT_LENGTH - current_length
+    padding = np.zeros((padding_length, series.shape[1]))
+    padded_series = np.vstack((series, padding))
+    padded_mask = np.hstack((np.ones(current_length), np.zeros(padding_length)))
+    return padded_series, padded_mask

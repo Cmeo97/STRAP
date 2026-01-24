@@ -68,7 +68,7 @@ def stumpy_dtaidistance_retrieval(
                 # ----------------------------
                 
                 episode_results = []
-                for offline_file in tqdm(offline_list, desc=f"Stumpy/Dtaidistance -- Retrieving data for {episode_key}"):
+                for offline_file in tqdm(offline_list, desc=f"Retrieving data for {episode_key}"):
                     with h5py.File(offline_file, 'r') as offline_f:
                         offline_data = offline_f['data']
                         for demo_key in list(offline_data.keys()):
@@ -109,76 +109,76 @@ def stumpy_dtaidistance_retrieval(
                         if data_key not in ['file_path', 'demo_key', 'lang_instruction']:
                             match_group.create_dataset(data_key, data=value)
 
-def modified_strap_retrieval(libero_10_list, libero_90_list, output_file, demo_per_task=1, min_length=60):
+def modified_strap_retrieval(libero_10_list, libero_90_list, output_file, demo_per_task=1, min_length=60, TOP_K=100):
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     with h5py.File(output_file, 'w') as outfile:
         results = outfile.create_group('results')
         episode_id = 0
 
-        # Read all hdf5 file in libero_10 dataset
-        for target_file in libero_10_list:
-            with h5py.File(target_file, 'r') as target_f:
-                target_data = target_f['data']
-                demo_list = list(target_data.keys())
-                select_demo_keys = random.sample(demo_list, demo_per_task)
-                for d_key in select_demo_keys:
-                    demo_data = target_data[d_key]
-                    ee_pose = demo_data['obs/ee_pos'][:]
-                    gripper_states = demo_data['obs/gripper_states'][:]
-                    joint_states = demo_data['obs/joint_states'][:]
-                    target_series = np.concatenate((ee_pose, gripper_states, joint_states), axis=1)
-                    segments = segment_trajectory_by_derivative(ee_pose)
-                    merged_segments = merge_short_segments(segments, min_length=min_length)
+        # save target data used for retrieval in a separate file
+        with h5py.File('data/target_data/modified_strap_target_data.hdf5', 'w') as target_data_file:
+            # Read all hdf5 file in libero_10 dataset
+            for target_file in libero_10_list:
+                with h5py.File(target_file, 'r') as target_f:
+                    target_data = target_f['data']
+                    demo_list = list(target_data.keys())
+                    select_demo_keys = random.sample(demo_list, demo_per_task)
+                    for d_key in select_demo_keys:
+                        demo_data = target_data[d_key]
+                        ee_pose = demo_data['obs/ee_pos'][:]
+                        gripper_states = demo_data['obs/gripper_states'][:]
+                        joint_states = demo_data['obs/joint_states'][:]
+                        target_series = np.concatenate((ee_pose, gripper_states, joint_states), axis=1)
+                        segments = segment_trajectory_by_derivative(ee_pose)
+                        merged_segments = merge_short_segments(segments, min_length=min_length)
                     
                     # extract slice indexes
-                    seg_idcs = [0] + list(accumulate(len(seg) for seg in merged_segments))
-                    for i in range(len(seg_idcs) - 1):
-                        episode_results = []
-                        episode = results.create_group(f"episode_{episode_id}")
-                        start = seg_idcs[i]
-                        end = seg_idcs[i+1]
+                        seg_idcs = [0] + list(accumulate(len(seg) for seg in merged_segments))
+                        for i in range(len(seg_idcs) - 1):
+                            episode_results = []
+                            episode = results.create_group(f"episode_{episode_id}")
+                            start = seg_idcs[i]
+                            end = seg_idcs[i+1]
+                            episode_grp = target_data_file.create_group(f"episode_{episode_id}")
+                            episode_grp.attrs["file_path"] = target_file
+                            episode_grp.attrs["demo_key"] = d_key
+                            episode_grp.create_dataset('actions', data=(demo_data['obs/ee_pos'][:][start:end])[np.newaxis, :, :])
+                            episode_grp.create_dataset('obs/ee_pos', data=(demo_data['obs/ee_pos'][:][start:end])[np.newaxis, :, :])
+                            episode_grp.create_dataset('obs/gripper_states', data=(demo_data['obs/gripper_states'][:][start:end])[np.newaxis, :, :])
+                            episode_grp.create_dataset('obs/joint_states', data=(demo_data['obs/joint_states'][:][start:end])[np.newaxis, :, :])
+                            episode_grp.create_dataset('robot_states', data=(demo_data['robot_states'][:][start:end])[np.newaxis, :, :])
+                            language_instruction = get_libero_lang_instruction(target_f, d_key)
+                            episode_grp.attrs['ep_meta'] = json.dumps({
+                                "lang": language_instruction
+                            })
 
-                        # save target data used for retrieval
-                        td_grp = episode.create_group("target_data")
-                        td_grp.attrs["file_path"] = target_file
-                        td_grp.attrs["demo_key"] = d_key
-                        td_grp.create_dataset('actions', data=demo_data['obs/ee_pos'][:][start:end])
-                        td_grp.create_dataset('obs/ee_pos', data=demo_data['obs/ee_pos'][:][start:end])
-                        td_grp.create_dataset('obs/gripper_states', data=demo_data['obs/gripper_states'][:][start:end])
-                        td_grp.create_dataset('obs/joint_states', data=demo_data['obs/joint_states'][:][start:end])
-                        td_grp.create_dataset('robot_states', data=demo_data['robot_states'][:][start:end])
-                        language_instruction = get_libero_lang_instruction(target_f, d_key)
-                        td_grp.attrs['ep_meta'] = json.dumps({
-                            "lang": language_instruction
-                        })
-
-                        # Query used for retrieval
-                        query = target_series[start: end]
-                        for offline_file in tqdm(libero_90_list, desc=f'Modified STRAP -- Retrieving Data for {episode_id}'):
-                            with h5py.File(offline_file, 'r') as offline_f:
-                                offline_data = offline_f['data']
-                                for demo_key in list(offline_data.keys()):
-                                    offline_series = get_demo_data(offline_data, demo_key)
-                                    match = modified_strap_single_matching(query, offline_series)
-                                    episode_results.append({
-                                        'cost': match[0],
-                                        'start_idx': match[1],
-                                        'end_idx': match[2],
-                                        'demo_key': demo_key,
-                                        'offline_file': offline_file
+                            # Query used for retrieval
+                            query = target_series[start: end]
+                            for offline_file in tqdm(libero_90_list, desc=f'Modified STRAP -- Retrieving Data for {episode_id}'):
+                                with h5py.File(offline_file, 'r') as offline_f:
+                                    offline_data = offline_f['data']
+                                    for demo_key in list(offline_data.keys()):
+                                        offline_series = get_demo_data(offline_data, demo_key)
+                                        match = modified_strap_single_matching(query, offline_series)
+                                        episode_results.append({
+                                            'cost': match[0],
+                                            'start_idx': match[1],
+                                            'end_idx': match[2],
+                                            'demo_key': demo_key,
+                                            'offline_file': offline_file
+                                        })
+                            processed_results = process_retrieval_results(episode_results, top_k=TOP_K)
+                            for match_key, data in processed_results.items():
+                                match_group = episode.create_group(match_key)
+                                match_group.attrs['ep_meta'] = json.dumps({
+                                        "lang": data['lang_instruction']
                                     })
-                        processed_results = process_retrieval_results(episode_results, top_k=100)
-                        for match_key, data in processed_results.items():
-                            match_group = episode.create_group(match_key)
-                            match_group.attrs['ep_meta'] = json.dumps({
-                                    "lang": data['lang_instruction']
-                                })
-                            match_group.attrs['file_path'] = data['file_path']
-                            match_group.attrs['demo_key'] = data['demo_key']
-                            for data_key, value in data.items():
-                                if data_key not in ['file_path', 'demo_key', 'lang_instruction']:
-                                    match_group.create_dataset(data_key, data=value)
-                        episode_id += 1
+                                match_group.attrs['file_path'] = data['file_path']
+                                match_group.attrs['demo_key'] = data['demo_key']
+                                for data_key, value in data.items():
+                                    if data_key not in ['file_path', 'demo_key', 'lang_instruction']:
+                                        match_group.create_dataset(data_key, data=value)
+                            episode_id += 1
 
 def shaplet_retrieval(target_file, offline_list, output_path, 
                       shapelet_model: LearningShapelets, window_size, 
@@ -234,22 +234,22 @@ def benchmark_libero(config):
     os.makedirs(retrieval_path, exist_ok=True)
     start_time = time.time()
     modified_strap_retrieval(libero_10_list, libero_90_list, f"{retrieval_path}/libero_retrieval_results_modified_strap.hdf5", 
-                             min_length=60)
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_stumpy.hdf5", 
-                                  stumpy=True)
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_dtaidistance.hdf5", 
-                                  dtaidistance=True)
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_qwen.hdf5", 
-                                  qwen_embedder=True, dataset="libero")
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_llama.hdf5",
-                                  llama_embedder=True, dataset="libero")
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_gemma.hdf5",
-                                  gemma_embedder=True, dataset="libero")
+                             min_length=60, TOP_K=150)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_stumpy.hdf5", 
+    #                               stumpy=True, TOP_K=150)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_dtaidistance.hdf5", 
+    #                               dtaidistance=True, TOP_K=150)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_qwen.hdf5", 
+    #                               qwen_embedder=True, dataset="libero", TOP_K=150)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_llama.hdf5",
+    #                               llama_embedder=True, dataset="libero", TOP_K=150)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_gemma.hdf5",
+    #                               gemma_embedder=True, dataset="libero", TOP_K=150)
     
-    # load the pre-trained shapelet model
-    shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['libero'])
-    shaplet_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_shapelet.hdf5",
-                      shapelet_model, window_size=100, stride=30, TOP_K=100)
+    # # load the pre-trained shapelet model
+    # shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['libero'])
+    # shaplet_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_shapelet.hdf5",
+    #                   shapelet_model, window_size=100, stride=30, TOP_K=150)
     
     end_time = time.time()
     print(f"Total Benchmarking Time for Libero Dataset: {(end_time - start_time)/60:.2f} minutes.")
@@ -264,20 +264,20 @@ def benchmark_nuscene(config):
     
     os.makedirs(retrieval_path, exist_ok=True)
     start_time = time.time()
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_stumpy.hdf5", 
-                                  stumpy=True, TOP_K=40)
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_dtaidistance.hdf5",
-                                  dtaidistance=True, TOP_K=40)
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_llm.hdf5",
-                                  qwen_embedder=True, TOP_K=40, dataset="nuscene")
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_llama.hdf5",
-                                  llama_embedder=True, TOP_K=40, dataset="nuscene")
-    stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_gemma.hdf5",
-                                  gemma_embedder=True, TOP_K=40, dataset="nuscene")
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_stumpy.hdf5", 
+    #                               stumpy=True, TOP_K=50)
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_dtaidistance.hdf5",
+    #                               dtaidistance=True, TOP_K=50)
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_llm.hdf5",
+    #                               qwen_embedder=True, TOP_K=50, dataset="nuscene")
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_llama.hdf5",
+    #                               llama_embedder=True, TOP_K=50, dataset="nuscene")
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_gemma.hdf5",
+    #                               gemma_embedder=True, TOP_K=50, dataset="nuscene")
     # load the pre-trained shapelet model
-    shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['nuscene'])
-    shaplet_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_shapelet.hdf5",
-                      shapelet_model, window_size=800, stride=200, TOP_K=20)
+    # shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['nuscene'])
+    # shaplet_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_shapelet.hdf5",
+    #                   shapelet_model, window_size=400, stride=100, TOP_K=50)
     
     end_time = time.time()
     print(f"Total Benchmarking Time for Nuscene Dataset: {(end_time - start_time)/60:.2f} minutes.")
@@ -294,19 +294,19 @@ def benchmark_droid(config):
     os.makedirs(retrieval_path, exist_ok=True)
     start_time = time.time()
     # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_stumpy.hdf5", 
-    #                               stumpy=True, TOP_K=40)
+    #                               stumpy=True, TOP_K=80)
     # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_dtaidistance.hdf5",
-    #                               dtaidistance=True, TOP_K=40)
+    #                               dtaidistance=True, TOP_K=80)
     # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_llm.hdf5",
-    #                               qwen_embedder=True, TOP_K=40, dataset="droid")
+    #                               qwen_embedder=True, TOP_K=80, dataset="droid")
     # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_llama.hdf5",
-    #                               llama_embedder=True, TOP_K=40, dataset="droid")
+    #                               llama_embedder=True, TOP_K=80, dataset="droid")
     # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_gemma.hdf5",
-    #                               gemma_embedder=True, TOP_K=40, dataset="droid")
+    #                               gemma_embedder=True, TOP_K=80, dataset="droid")
     # # load the pre-trained shapelet model
     shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['droid'])
     shaplet_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_shapelet.hdf5",
-                      shapelet_model, window_size=170, stride=20, TOP_K=20)
+                      shapelet_model, window_size=170, stride=20, TOP_K=80)
     
     end_time = time.time()
     print(f"Total Benchmarking Time for Droid Dataset: {(end_time - start_time)/60:.2f} minutes.")
@@ -318,6 +318,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     config  = yaml.safe_load(open(args.config, 'r'))
         
-    #benchmark_libero(config)
+    benchmark_libero(config)
     #benchmark_nuscene(config)
-    benchmark_droid(config)
+    #benchmark_droid(config)
