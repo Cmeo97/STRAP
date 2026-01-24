@@ -3,6 +3,7 @@ import glob
 import traceback
 import h5py
 import numpy as np
+import torch
 from typing import Dict, List, Optional
 from string import ascii_uppercase
 from scipy.interpolate import interp1d
@@ -385,11 +386,19 @@ def pad_zeros_to_length(series, MOMENT_LENGTH=512):
     Returns:
         np.ndarray of shape (MOMENT_LENGTH, features)
     """
+    if series.shape[0] > MOMENT_LENGTH:
+        series = resize_scipy(series, MOMENT_LENGTH)
     current_length = series.shape[0]
-    if current_length >= MOMENT_LENGTH:
-        return resize_scipy(series, MOMENT_LENGTH)
     padding_length = MOMENT_LENGTH - current_length
     padding = np.zeros((padding_length, series.shape[1]))
     padded_series = np.vstack((series, padding))
-    padded_mask = np.hstack((np.ones(current_length), np.zeros(padding_length)))
+    padded_series = np.swapaxes(padded_series, 0, 1)  # (features, MOMENT_LENGTH)
+    padded_mask = np.array([1]*current_length + [0]*padding_length)
+    
+    padded_series = np.expand_dims(padded_series, axis=0)  # (1, features, MOMENT_LENGTH)
+    padded_mask = np.expand_dims(padded_mask, axis=0)      # (1, MOMENT_LENGTH)
+
+    padded_series = torch.tensor(padded_series, dtype=torch.float32)
+    padded_mask = torch.tensor(padded_mask, dtype=torch.float32)
+
     return padded_series, padded_mask

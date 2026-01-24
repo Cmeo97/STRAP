@@ -1,17 +1,21 @@
 import os
 import numpy as np
 import stumpy
+import torch
+import torch.nn.functional as F
 from dtaidistance.subsequence.dtw import subsequence_search
 from strap.utils.retrieval_utils import (
    compute_accumulated_cost_matrix_subsequence_dtw_21,
    compute_optimal_warping_path_subsequence_dtw_21,
    get_distance_matrix
 )
-from benchmarking.benchmark_utils import transform_series_to_text
+from benchmarking.benchmark_utils import transform_series_to_text, pad_zeros_to_length
 from tslearn.preprocessing import TimeSeriesScalerMinMax
 from tslearn.shapelets import LearningShapelets
 stumpy.config.STUMPY_EXCL_ZONE_DENOM = np.inf
 from momentfm import MOMENTPipeline
+
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def stumpy_single_matching(query, series, top_k=None, dist_thres=None):
     if query.shape[0] > query.shape[1]:
@@ -150,9 +154,10 @@ def llm_matching(query_embedding, query, series, top_k=None, embedder_model=None
     print("Finished results...")
     return results
 
-def momentfm_matching(query, series, momentfm_model: MOMENTPipeline, stride):
+def momentfm_matching(query_embedding, series, momentfm_model: MOMENTPipeline, query_length):
     L, D = series.shape
-    window_size = query.shape[0]
+    window_size = query_length
+    stride = int(np.floor(window_size / 4))
     window_starts = np.arange(0, L - window_size + 1, stride)
     
     candidates = []
@@ -160,13 +165,12 @@ def momentfm_matching(query, series, momentfm_model: MOMENTPipeline, stride):
         start_frame = int(window_starts[i])
         end_frame = int(start_frame + window_size)
         window = series[start_frame:end_frame, :]
+        window, pad_mask = pad_zeros_to_length(window, 512)
+        window = window.to(DEVICE)
+        pad_mask = pad_mask.to(DEVICE)
 
-        series_embedding = momentfm_model.encode(window)
+        series_embedding = momentfm_model(x_enc=window, input_mask=pad_mask)
+        similarity = F.cosine_similarity(query_embedding.embeddings, series_embedding.embeddings, dim=-1)
 
-        candidates.append({
-            "cost": distance,
-            "start_idx": start_frame,
-            "end_idx": end_frame,
-            "demo_key": None,
-        })
+        candidates.append([1.0 - similarity.item(), start_frame, end_frame])
     return candidates

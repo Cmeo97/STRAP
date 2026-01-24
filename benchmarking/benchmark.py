@@ -6,6 +6,7 @@ import time
 import random
 import yaml
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 import argparse
 from itertools import accumulate
@@ -16,12 +17,19 @@ from benchmarking.benchmark_models import (
     dtaidistance_single_matching,
     modified_strap_single_matching,
     shaplet_matching,
-    llm_matching
+    llm_matching,
+    momentfm_matching
 )
-from sentence_transformers import SentenceTransformer
+#from sentence_transformers import SentenceTransformer
+from momentfm import MOMENTPipeline
 from tslearn.preprocessing import TimeSeriesScalerMinMax
 from tslearn.shapelets import LearningShapelets
-from benchmarking.benchmark_utils import get_demo_data, process_retrieval_results, transform_series_to_text
+from benchmarking.benchmark_utils import (
+    get_demo_data, 
+    process_retrieval_results, 
+    transform_series_to_text,
+    pad_zeros_to_length
+)
 from strap.utils.retrieval_utils import segment_trajectory_by_derivative, merge_short_segments
 
 
@@ -34,17 +42,23 @@ def stumpy_dtaidistance_retrieval(
     qwen_embedder=False, 
     llama_embedder=False, 
     gemma_embedder=False,
+    moment_model=False,
     TOP_K=100, 
     dataset="libero"
 ):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     embedder_model = None
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if qwen_embedder:
         embedder_model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
     if llama_embedder:
         embedder_model = SentenceTransformer("nvidia/llama-nemotron-embed-1b-v2", trust_remote_code=True)
     if gemma_embedder:
         embedder_model = SentenceTransformer("google/embeddinggemma-300m")
+    if moment_model:
+        embedder_model = MOMENTPipeline.from_pretrained("AutonLab/MOMENT-1-large", model_kwargs={'task_name': 'embedding'})
+        embedder_model.init()
+        embedder_model.to(device)
     with h5py.File(output_path, 'w') as outfile:
         results = outfile.create_group('results')
         with h5py.File(target_path, 'r') as f:
@@ -65,6 +79,11 @@ def stumpy_dtaidistance_retrieval(
                         target_embeddings = embedder_model.encode_query(query_prompt, convert_to_tensor=True)
                     if gemma_embedder:
                         target_embeddings = embedder_model.encode(query_prompt)
+                    if moment_model:
+                        padded_target, pad_mask = pad_zeros_to_length(target_series[0], 512)
+                        padded_target = padded_target.to(device)
+                        pad_mask = pad_mask.to(device)
+                        target_embeddings = embedder_model(x_enc=padded_target, input_mask=pad_mask)
                 # ----------------------------
                 
                 episode_results = []
@@ -87,6 +106,13 @@ def stumpy_dtaidistance_retrieval(
                                     model_type="qwen" if qwen_embedder else "llama" if llama_embedder else "gemma",
                                     max_windows=10,
                                     dataset=dataset
+                                )
+                            if moment_model:
+                                 result = momentfm_matching(
+                                    target_embeddings, 
+                                    offline_series, 
+                                    embedder_model,
+                                    query_length=target_series[0].shape[0],
                                 )
                             for match in result:
                                 if match:
@@ -233,8 +259,8 @@ def benchmark_libero(config):
     
     os.makedirs(retrieval_path, exist_ok=True)
     start_time = time.time()
-    modified_strap_retrieval(libero_10_list, libero_90_list, f"{retrieval_path}/libero_retrieval_results_modified_strap.hdf5", 
-                             min_length=60, TOP_K=150)
+    # modified_strap_retrieval(libero_10_list, libero_90_list, f"{retrieval_path}/libero_retrieval_results_modified_strap.hdf5", 
+    #                          min_length=60, TOP_K=150)
     # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_stumpy.hdf5", 
     #                               stumpy=True, TOP_K=150)
     # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_dtaidistance.hdf5", 
@@ -250,6 +276,9 @@ def benchmark_libero(config):
     # shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['libero'])
     # shaplet_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_shapelet.hdf5",
     #                   shapelet_model, window_size=100, stride=30, TOP_K=150)
+
+    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_momentfm.hdf5",
+                                  moment_model=True, TOP_K=150)
     
     end_time = time.time()
     print(f"Total Benchmarking Time for Libero Dataset: {(end_time - start_time)/60:.2f} minutes.")
