@@ -13,6 +13,10 @@ from benchmarking.benchmark_utils import (
     load_retrieved_hdf5,
 )
 from benchmarking.distribution_plots import create_combined_distribution_plots
+from benchmarking.evaluator_utils import (
+    get_reference_path,
+    load_distribution_data_from_evaluations,
+)
 
 
 def evaluate_with_sliding_windows(
@@ -231,46 +235,6 @@ def run_evaluation(
     return output
 
 
-def get_reference_path(
-    benchmark: str,
-    method: str,
-    config: Dict[str, Any]
-) -> str:
-    """
-    Get the reference data path for a given benchmark and method.
-    
-    IMPORTANT: modified_strap METHOD (on libero benchmark) ALWAYS uses modified_strap_target_data.hdf5,
-    NEVER libero_target_dataset.hdf5, even though its retrieval data is in libero folder.
-    
-    Args:
-        benchmark: Name of the benchmark
-        method: Name of the method
-        config: Configuration dictionary
-        
-    Returns:
-        Path to reference data file
-    """
-    # HARDCODED: modified_strap method always uses its own target, never libero's
-    if method == 'modified_strap':
-        target_path = config['dataset_paths']['modified_strap_target']
-        if not os.path.exists(target_path):
-            raise FileNotFoundError(
-                f"modified_strap target file not found: {target_path}\n"
-                f"This file is REQUIRED and must exist. modified_strap method NEVER uses libero_target."
-            )
-        return target_path
-    
-    # For all other methods, use the benchmark's target
-    target_key = f'{benchmark}_target'
-    if target_key not in config['dataset_paths']:
-        raise KeyError(
-            f"Reference path not found for benchmark '{benchmark}'. "
-            f"Expected key '{target_key}' in config['dataset_paths']. "
-            f"Available keys: {list(config['dataset_paths'].keys())}"
-        )
-    return config['dataset_paths'][target_key]
-
-
 def run_calculations(config: Dict[str, Any]) -> Dict[str, Dict[int, Dict[str, Dict[str, np.ndarray]]]]:
     """
     Run evaluation calculations for all benchmark/method/top_k combinations.
@@ -466,70 +430,6 @@ def run_plots(config: Dict[str, Any], distribution_data: Dict[str, Dict[int, Dic
     )
 
 
-def load_distribution_data_from_evaluations(config: Dict[str, Any]) -> Dict[str, Dict[int, Dict[str, Dict[str, np.ndarray]]]]:
-    """
-    Load distribution data by re-reading evaluation results.
-    This is used for plots-only mode.
-    
-    Returns:
-        distribution_data: Nested dict structure: benchmark -> top_k -> task -> {method: data}
-    """
-    benchmarks = config.get('benchmarks', [])
-    methods = config.get('methods', [])
-    
-    TOP_K_RANGES = {
-        'libero': list(range(50, 151, 20)),
-        'nuscene': list(range(20, 51, 10)),
-        'droid': list(range(40, 81, 10)),
-    }
-    
-    distribution_data = {}
-    
-    for benchmark in benchmarks:
-        top_k_values = TOP_K_RANGES.get(benchmark, [])
-        if benchmark not in distribution_data:
-            distribution_data[benchmark] = {}
-        
-        base_retrieval_path = config['retrieval_paths'][benchmark]
-        
-        for method in methods:
-            # HARDCODED: modified_strap method retrieval files are in libero folder but named libero_retrieval_results_modified_strap.hdf5
-            # This is because the retrieval was done using libero data, but evaluation uses modified_strap_target
-            if method == 'modified_strap':
-                retrieved_path = os.path.join(
-                    config['retrieval_paths']['libero'], f'libero_retrieval_results_{method}.hdf5'
-                )
-                print(f"[modified_strap method] Using retrieval file from libero folder: {retrieved_path}")
-                print(f"[modified_strap method] Will evaluate against modified_strap_target_data.hdf5 (NOT libero_target)")
-            else:
-                retrieved_path = os.path.join(
-                    base_retrieval_path, f'{benchmark}_retrieval_results_{method}.hdf5'
-                )
-            
-            if not os.path.exists(retrieved_path):
-                continue
-            
-            for top_k in top_k_values:
-                # HARDCODED: modified_strap method stores data under 'modified_strap' key for separate folder structure
-                plot_benchmark = 'modified_strap' if method == 'modified_strap' else benchmark
-                if plot_benchmark not in distribution_data:
-                    distribution_data[plot_benchmark] = {}
-                if top_k not in distribution_data[plot_benchmark]:
-                    distribution_data[plot_benchmark][top_k] = {}
-                
-                try:
-                    retrieved_data = load_retrieved_hdf5(retrieved_path, top_k=top_k)
-                    for task, task_retrieved in retrieved_data.items():
-                        if task_retrieved is None:
-                            continue  # Skip episodes with no matches for plotting
-                        if task not in distribution_data[plot_benchmark][top_k]:
-                            distribution_data[plot_benchmark][top_k][task] = {}
-                        distribution_data[plot_benchmark][top_k][task][method] = task_retrieved
-                except Exception as e:
-                    print(f"Warning: Could not load data for {benchmark}/{method}/top_{top_k}: {e}")
-                    continue
-    
-    return distribution_data
 
 
 def main():

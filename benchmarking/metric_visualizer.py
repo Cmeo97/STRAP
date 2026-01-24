@@ -1,8 +1,5 @@
-import json
 import os
-import glob
-import re
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -16,127 +13,13 @@ from plotnine import (
     scale_x_discrete, scale_y_discrete, scale_y_continuous, position_dodge
 )
 
-# ============================================================
-# I/O
-# ============================================================
-
-def load_metrics(path: str) -> Dict[str, Any]:
-    """Load metrics JSON file."""
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f"Metrics file not found: {path}")
-
-    with open(path, "r") as f:
-        data = json.load(f)
-
-    if not isinstance(data, dict):
-        raise ValueError("Top-level JSON must be episode-keyed dict")
-
-    return data
-
-
-def parse_filename(filename: str) -> Tuple[str, str, Optional[int]]:
-    """
-    Parse filename and path to extract dataset, method, and top_k.
-    Format: .../[dataset]/top_[k]/[dataset]_retrieval_evaluation_[method].json
-    Returns: (dataset, method, top_k)
-    """
-    # Extract top_k from directory path
-    top_k = None
-    path_parts = filename.split(os.sep)
-    for part in path_parts:
-        if part.startswith("top_"):
-            try:
-                top_k = int(part.split("_")[1])
-            except (ValueError, IndexError):
-                pass
-    
-    # Extract dataset and method from filename
-    match = re.match(r"(.+)_retrieval_evaluation_(.+)\.json", os.path.basename(filename))
-    if not match:
-        raise ValueError(f"Filename format not recognized: {filename}")
-    return match.group(1), match.group(2), top_k
-
-
-def find_all_evaluation_files(results_dir: str) -> List[str]:
-    """
-    Find all evaluation JSON files in the results directory.
-    Searches recursively in top_K subdirectories.
-    Handles both:
-    - Root directory: data/evaluation_results (searches in all benchmarks)
-    - Benchmark directory: data/evaluation_results/libero (searches in top_K subdirs)
-    """
-    files = []
-    
-    # Pattern 1: Search in benchmark/top_K structure: results_dir/*/top_*/...json
-    # This handles root directory like data/evaluation_results
-    pattern1 = os.path.join(results_dir, "*", "top_*", "*_retrieval_evaluation_*.json")
-    files.extend(glob.glob(pattern1))
-    
-    # Pattern 2: Search directly in top_K subdirs: results_dir/top_*/...json
-    # This handles benchmark directory like data/evaluation_results/libero
-    pattern2 = os.path.join(results_dir, "top_*", "*_retrieval_evaluation_*.json")
-    files.extend(glob.glob(pattern2))
-    
-    # Pattern 3: Backward compatibility - search directly in results_dir
-    # This handles old structure without top_K subdirectories
-    pattern3 = os.path.join(results_dir, "*_retrieval_evaluation_*.json")
-    files.extend(glob.glob(pattern3))
-    
-    # Remove duplicates and sort
-    files = sorted(list(set(files)))
-    
-    return files
-
-
-# ============================================================
-# Flattening
-# ============================================================
-
-def flatten_metrics(raw: Dict[str, Any], exclude_averaged: bool = True) -> pd.DataFrame:
-    """
-    Convert metrics dict to DataFrame.
-    Handles flattened metric names like "distributional_coverage.density".
-    """
-    rows = []
-    
-    for episode, m in raw.items():
-        # Skip averaged_metrics if requested
-        if exclude_averaged and episode == "averaged_metrics":
-            continue
-            
-        if not isinstance(m, dict):
-            continue
-            
-        try:
-            row = {
-                "episode": episode,
-                "wasserstein": m.get("wasserstein"),
-                "dtw_nn": m.get("dtw_nn"),
-                "spectral_wasserstein": m.get("spectral_wasserstein"),
-                "temporal_correlation": m.get("temporal_correlation"),
-                "density": m.get("distributional_coverage.density"),
-                "coverage": m.get("distributional_coverage.coverage"),
-                "diversity_icd": m.get("diversity_icd"),
-            }
-            # Only add if all required metrics are present
-            if all(v is not None for v in row.values() if isinstance(v, (int, float))):
-                rows.append(row)
-        except (KeyError, AttributeError) as e:
-            # Skip episodes with missing metrics
-            continue
-
-    if not rows:
-        raise ValueError("No valid episodes found in metrics file")
-        
-    df = pd.DataFrame(rows).set_index("episode")
-    return df
-
-
-def load_averaged_metrics(raw: Dict[str, Any]) -> Dict[str, float]:
-    """Extract averaged metrics if present."""
-    if "averaged_metrics" in raw:
-        return raw["averaged_metrics"]
-    return {}
+from benchmarking.evaluator_utils import (
+    load_metrics,
+    parse_filename,
+    find_all_evaluation_files,
+    flatten_metrics,
+    load_averaged_metrics,
+)
 
 
 # ============================================================
@@ -812,7 +695,7 @@ if __name__ == "__main__":
         # Get the project root (assuming script is in benchmarking/)
         script_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(script_dir)
-        args.metrics_path = os.path.join(project_root, "data")
+        args.metrics_path = os.path.join(project_root, "data/evaluation_results")
     
     # If metrics_path is a file, use its directory for comparison
     if os.path.isfile(args.metrics_path):
