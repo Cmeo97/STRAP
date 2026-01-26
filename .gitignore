@@ -229,3 +229,5 @@ data/droid/*json
 *.pth
 
 generated_tables/*
+
+**/*.pdf
