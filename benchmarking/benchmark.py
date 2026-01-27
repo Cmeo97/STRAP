@@ -20,9 +20,8 @@ from benchmarking.benchmark_models import (
     llm_matching,
     momentfm_matching
 )
-#from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer
 from momentfm import MOMENTPipeline
-from tslearn.preprocessing import TimeSeriesScalerMinMax
 from tslearn.shapelets import LearningShapelets
 from benchmarking.benchmark_utils import (
     get_demo_data, 
@@ -129,6 +128,8 @@ def stumpy_dtaidistance_retrieval(
                     match_group.attrs['ep_meta'] = json.dumps({
                             "lang": data['lang_instruction']
                         })
+                    match_group.attrs['start_idx'] = data['start_idx']
+                    match_group.attrs['end_idx'] = data['end_idx']
                     match_group.attrs['file_path'] = data['file_path']
                     match_group.attrs['demo_key'] = data['demo_key']
                     for data_key, value in data.items():
@@ -199,6 +200,8 @@ def modified_strap_retrieval(libero_10_list, libero_90_list, output_file, demo_p
                                 match_group.attrs['ep_meta'] = json.dumps({
                                         "lang": data['lang_instruction']
                                     })
+                                match_group.attrs['start_idx'] = data['start_idx']
+                                match_group.attrs['end_idx'] = data['end_idx']
                                 match_group.attrs['file_path'] = data['file_path']
                                 match_group.attrs['demo_key'] = data['demo_key']
                                 for data_key, value in data.items():
@@ -240,6 +243,8 @@ def shaplet_retrieval(target_file, offline_list, output_path,
                 match_group.attrs['ep_meta'] = json.dumps({
                         "lang": data['lang_instruction']
                     })
+                match_group.attrs['start_idx'] = data['start_idx']
+                match_group.attrs['end_idx'] = data['end_idx']
                 match_group.attrs['file_path'] = data['file_path']
                 match_group.attrs['demo_key'] = data['demo_key']
                 for data_key, value in data.items():
@@ -277,8 +282,8 @@ def benchmark_libero(config):
     # shaplet_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_shapelet.hdf5",
     #                   shapelet_model, window_size=100, stride=30, TOP_K=150)
 
-    stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_momentfm.hdf5",
-                                  moment_model=True, TOP_K=150)
+    # stumpy_dtaidistance_retrieval(target_data_path, libero_90_list, f"{retrieval_path}/libero_retrieval_results_momentfm.hdf5",
+    #                               moment_model=True, TOP_K=150, dataset="libero")
     
     end_time = time.time()
     print(f"Total Benchmarking Time for Libero Dataset: {(end_time - start_time)/60:.2f} minutes.")
@@ -307,6 +312,8 @@ def benchmark_nuscene(config):
     # shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['nuscene'])
     # shaplet_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_shapelet.hdf5",
     #                   shapelet_model, window_size=400, stride=100, TOP_K=50)
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/nuscene_retrieval_results_momentfm.hdf5",
+    #                               moment_model=True, TOP_K=50, dataset="nuscene")
     
     end_time = time.time()
     print(f"Total Benchmarking Time for Nuscene Dataset: {(end_time - start_time)/60:.2f} minutes.")
@@ -333,10 +340,11 @@ def benchmark_droid(config):
     # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_gemma.hdf5",
     #                               gemma_embedder=True, TOP_K=80, dataset="droid")
     # # load the pre-trained shapelet model
-    shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['droid'])
-    shaplet_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_shapelet.hdf5",
-                      shapelet_model, window_size=170, stride=20, TOP_K=80)
-    
+    # shapelet_model = LearningShapelets.from_json(config['shapelet_ckpt_paths']['droid'])
+    # shaplet_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_shapelet.hdf5",
+    #                   shapelet_model, window_size=170, stride=20, TOP_K=80)
+    # stumpy_dtaidistance_retrieval(target_data_path, offline_list, f"{retrieval_path}/droid_retrieval_results_momentfm.hdf5",
+    #                               moment_model=True, TOP_K=80, dataset="droid")
     end_time = time.time()
     print(f"Total Benchmarking Time for Droid Dataset: {(end_time - start_time)/60:.2f} minutes.")
 
@@ -348,5 +356,5 @@ if __name__ == "__main__":
     config  = yaml.safe_load(open(args.config, 'r'))
         
     benchmark_libero(config)
-    #benchmark_nuscene(config)
-    #benchmark_droid(config)
+    benchmark_nuscene(config)
+    benchmark_droid(config)

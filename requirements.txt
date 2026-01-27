@@ -1,9 +1,9 @@
 numpy<2
 matplotlib
 tqdm
+seaborn
 torch
 torchvision
-transformers
 opencv-python
 h5py
 numba
@@ -12,4 +12,6 @@ stumpy
 dtaidistance
 sentence-transformers
 keras
-tslearn==0.8.0
+momentfm
+transformers==4.57.6
+tslearn[all_features] @ https://github.com/tslearn-team/tslearn/archive/main.zip

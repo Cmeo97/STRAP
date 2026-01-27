@@ -94,6 +94,8 @@ def process_retrieval_results(episode_results, top_k=None, max_distance=None):
                 output[f"match_{i}"]['obs/ee_pos'] = ee_pose[result['start_idx']:result['end_idx']]
                 output[f"match_{i}"]['obs/gripper_states'] = gripper_states[result['start_idx']:result['end_idx']]
                 output[f"match_{i}"]['obs/joint_states'] = joint_states[result['start_idx']:result['end_idx']]
+                output[f"match_{i}"]['start_idx'] = result['start_idx']
+                output[f"match_{i}"]['end_idx'] = result['end_idx']
                 output[f"match_{i}"]['file_path'] = result['offline_file']
                 output[f"match_{i}"]['demo_key'] = result['demo_key']
                 output[f"match_{i}"]['lang_instruction'] = get_libero_lang_instruction(f, result['demo_key'])
@@ -105,6 +107,8 @@ def process_retrieval_results(episode_results, top_k=None, max_distance=None):
                 output[f"match_{i}"]['obs/velocity'] = velocity[result['start_idx']:result['end_idx']]
                 output[f"match_{i}"]['obs/acceleration'] = acceleration[result['start_idx']:result['end_idx']]
                 output[f"match_{i}"]['obs/yaw_rate'] = yaw_rate[result['start_idx']:result['end_idx']]
+                output[f"match_{i}"]['start_idx'] = result['start_idx']
+                output[f"match_{i}"]['end_idx'] = result['end_idx']
                 output[f"match_{i}"]['file_path'] = result['offline_file']
                 output[f"match_{i}"]['demo_key'] = result['demo_key']
                 output[f"match_{i}"]['lang_instruction'] = f.attrs.get('language_instruction', 'No instruction available')
@@ -116,6 +120,8 @@ def process_retrieval_results(episode_results, top_k=None, max_distance=None):
                 output[f"match_{i}"]['obs/cartesian_positions'] = cartesian_positions[result['start_idx']:result['end_idx']]
                 output[f"match_{i}"]['obs/gripper_states'] = gripper_states[result['start_idx']:result['end_idx']]
                 output[f"match_{i}"]['obs/joint_states'] = joint_states[result['start_idx']:result['end_idx']]
+                output[f"match_{i}"]['start_idx'] = result['start_idx']
+                output[f"match_{i}"]['end_idx'] = result['end_idx']
                 output[f"match_{i}"]['file_path'] = result['offline_file']
                 output[f"match_{i}"]['demo_key'] = result['demo_key']
                 output[f"match_{i}"]['lang_instruction'] = f.attrs.get('language_instruction', 'No instruction available')

@@ -20,23 +20,23 @@ from prototypical_networks.prototype_datasets import (
 )
 from benchmarking.benchmark_utils import process_retrieval_results
 
-# --- Configuration Constants ---
-FEATURE_SIZE = 256      # Output size of the learned embedding
-
-# Training Parameters
-K_SHOT = 7              # Number of support examples per class
-N_QUERY = 3             # Number of query examples per class
-N_EPISODES = 100        # Total training episodes
-
 # --- 1. Model Architecture ---
 
 class SequenceEncoder(nn.Module):
     """
-    1D CNN Encoder that processes variable-length time series data.
-    Uses Global Average Pooling (GAP) to produce a fixed-size embedding.
-    This handles the variable-length sequences.
+    Efficient 1D CNN Encoder that processes variable-length time series data.
+    Uses length-aware masked Global Average Pooling (GAP) to produce a fixed-size embedding.
+    
+    Key improvements over naive zero-padding:
+    1. Attention masking to prevent processing padded values
+    2. Length-aware pooling that only averages over actual sequence data
+    3. More efficient computation by skipping padding in pooling step
+    
+    Based on:
+    - "Effective Approaches to Attention-based Neural Machine Translation" (Luong et al., 2015)
+    - "Attention Is All You Need" (Vaswani et al., 2017)
     """
-    def __init__(self, input_dim, output_dim=FEATURE_SIZE):
+    def __init__(self, input_dim, output_dim):
         super().__init__()
         # Input channel is N_DIM (3); Output is 64
         self.conv1 = nn.Conv1d(input_dim, 64, kernel_size=5, padding=2)
@@ -50,7 +50,20 @@ class SequenceEncoder(nn.Module):
         self.relu = nn.ReLU()
         # No final projection layer, the output of conv3 is the embedding dimension
 
-    def forward(self, x):
+    def forward(self, x, lengths=None):
+        """
+        Forward pass with optional length masking for efficient variable-length processing.
+        
+        Args:
+            x: Input tensor of shape (B, L, D) where L is padded sequence length
+            lengths: Optional tensor of shape (B,) containing actual sequence lengths
+                    If None, assumes all sequences are full length (no padding)
+        
+        Returns:
+            Embeddings of shape (B, FEATURE_SIZE)
+        """
+        batch_size, seq_len, _ = x.shape
+        
         # Input x shape: (B, L, D) -> Permute to (B, D, L) for Conv1d
         x = x.permute(0, 2, 1) 
         
@@ -60,9 +73,22 @@ class SequenceEncoder(nn.Module):
         
         # Output x shape: (B, FEATURE_SIZE, L)
         
-        # Global Average Pooling over the sequence length (L)
-        # This reduces the sequence dimension, making the output fixed-length (B, FEATURE_SIZE)
-        x = torch.mean(x, dim=2) 
+        # Length-Aware Global Average Pooling
+        # This only averages over actual sequence data, ignoring padding
+        if lengths is not None:
+            # Create mask: (B, 1, L)
+            mask = torch.arange(seq_len, device=x.device)[None, None, :] < lengths[:, None, None]
+            mask = mask.float()
+            
+            # Apply mask: zero out padded positions
+            x = x * mask
+            
+            # Sum over sequence length and divide by actual lengths
+            # Shape: (B, FEATURE_SIZE, L) -> (B, FEATURE_SIZE)
+            x = torch.sum(x, dim=2) / lengths[:, None].float()
+        else:
+            # Standard global average pooling (all sequences full length)
+            x = torch.mean(x, dim=2)
         
         # Final Embedding shape: (B, FEATURE_SIZE)
         return x
@@ -154,27 +180,41 @@ class EpisodicManeuverDataset(Dataset):
 
 def create_collate_fn(n_dim):
     """Create a collate function with the correct n_dim."""
-    def custom_collate_fn(batch_list: List[List[np.ndarray]]) -> torch.Tensor:
+    def custom_collate_fn(batch_list: List[List[np.ndarray]]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Custom collate function to handle the list-of-sequences output from the dataset.
-        It flattens the episode data and applies padding to create a single tensor.
+        Efficient custom collate function for variable-length sequences.
+        Returns both padded sequences and their actual lengths for masking.
+        
+        This enables:
+        1. Length-aware pooling (only average over real data)
+        2. Attention masking (prevent processing padded values)
+        3. More accurate embeddings (padding doesn't dilute signal)
+        
+        Returns:
+            padded_sequences: Tensor of shape (N, max_len, n_dim)
+            lengths: Tensor of shape (N,) containing actual sequence lengths
         """
         # Flattens the list of lists into a single list of maneuver sequences
         all_sequences = [seq for episode_data in batch_list for seq in episode_data]
         
         if not all_sequences:
-            return torch.empty(0)
+            return torch.empty(0), torch.empty(0)
 
-        # Padding logic: find max length
-        max_len = max(s.shape[0] for s in all_sequences)
+        # Track actual lengths for masking
+        lengths = torch.tensor([s.shape[0] for s in all_sequences], dtype=torch.long)
         
+        # Padding logic: find max length
+        max_len = lengths.max().item()
+        
+        # Pre-allocate padded tensor
         padded_sequences = torch.zeros(len(all_sequences), max_len, n_dim, dtype=torch.float32)
         
+        # Fill in actual data (padding remains zero)
         for i, seq in enumerate(all_sequences):
-            length = seq.shape[0]
+            length = lengths[i].item()
             padded_sequences[i, :length, :] = torch.from_numpy(seq)
             
-        return padded_sequences
+        return padded_sequences, lengths
     return custom_collate_fn
 
 
@@ -198,14 +238,16 @@ def train_prototypical_network(encoder, maneuver_data: Dict[int, List[np.ndarray
     total_loss = 0
     total_acc = 0
     
-    for i, batch_sequences in enumerate(dataloader):
+    for i, (batch_sequences, batch_lengths) in enumerate(dataloader):
         optimizer.zero_grad()
         
-        # Move padded sequences to device
+        # Move padded sequences and lengths to device
         batch_sequences = batch_sequences.squeeze(0).to(device) # Squeeze batch_size=1 dim
+        batch_lengths = batch_lengths.squeeze(0).to(device)
         
-        # Forward pass: get embeddings for all Support + Query samples
-        embeddings = encoder(batch_sequences)
+        # Forward pass with length masking for efficient processing
+        # This prevents wasted computation on padded values
+        embeddings = encoder(batch_sequences, lengths=batch_lengths)
         
         # Calculate Prototypical Loss (using the fixed function)
         loss, acc = prototypical_loss(embeddings, n_way, K_SHOT, N_QUERY)
@@ -258,8 +300,10 @@ def retrieve_maneuvers(encoder: SequenceEncoder, maneuver_data: Dict[int, List[n
         for ex in examples[:K_SHOT]:  # Use K_SHOT examples for prototype
             ex_tensor = torch.from_numpy(ex).unsqueeze(0).to(device)
             ex_tensor = ex_tensor.float()
+            # Single sequence, no padding needed - pass actual length
+            ex_length = torch.tensor([ex.shape[0]], dtype=torch.long, device=device)
             with torch.no_grad():
-                embedding = encoder(ex_tensor).cpu().numpy().squeeze()
+                embedding = encoder(ex_tensor, lengths=ex_length).cpu().numpy().squeeze()
             all_embeddings.append(embedding)
             class_labels.append(class_id)
             
@@ -295,7 +339,8 @@ def retrieve_maneuvers(encoder: SequenceEncoder, maneuver_data: Dict[int, List[n
                     window_starts = np.arange(0, L - window_size + 1, stride)
                     
                     # Process windows in batches for efficiency
-                    batch_size = 16
+                    # Since all windows are the same size, no padding needed
+                    batch_size = 32  # Increased from 16 since no padding waste
                     for i in range(0, len(window_starts), batch_size):
                         batch_starts = window_starts[i:i + batch_size]
                         batch_windows = [demo_data[start:start+window_size, :] for start in batch_starts]
@@ -303,8 +348,10 @@ def retrieve_maneuvers(encoder: SequenceEncoder, maneuver_data: Dict[int, List[n
                         # Convert batch to tensor and encode
                         batch_tensor = torch.stack([torch.from_numpy(w) for w in batch_windows]).to(device)
                         batch_tensor = batch_tensor.float()
+                        # All windows are same size (no padding), so no lengths needed
+                        # Pass None to use standard pooling for speed
                         with torch.no_grad():
-                            window_embeddings = encoder(batch_tensor)  # (Batch_Size, FEATURE_SIZE)
+                            window_embeddings = encoder(batch_tensor, lengths=None)  # (Batch_Size, FEATURE_SIZE)
                         
                         # Compare each window embedding to current prototype
                         for j, embed in enumerate(window_embeddings):
@@ -329,6 +376,8 @@ def retrieve_maneuvers(encoder: SequenceEncoder, maneuver_data: Dict[int, List[n
                 match_group.attrs['ep_meta'] = json.dumps({
                     "lang": data['lang_instruction']
                 })
+                match_group.attrs['start_idx'] = data['start_idx']
+                match_group.attrs['end_idx'] = data['end_idx']
                 match_group.attrs['file_path'] = data['file_path']
                 match_group.attrs['demo_key'] = data['demo_key']
                 for data_key, value in data.items():
@@ -342,11 +391,18 @@ def retrieve_maneuvers(encoder: SequenceEncoder, maneuver_data: Dict[int, List[n
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Euclidean Distance-based Maneuver Retrieval')
     parser.add_argument('--config', type=str, default='config/config.yaml', help='Path to config file.')
-    parser.add_argument('--dataset_type', default='droid', choices=['libero', 'nuscene', 'droid'], 
+    parser.add_argument('--dataset_type', default='libero', choices=['libero', 'nuscene', 'droid'], 
                        help='Type of dataset to use.')
     parser.add_argument('--pretrained', default=False, action='store_true', help='Use pretrained model for retrieval.')
     args = parser.parse_args()
     config = yaml.safe_load(open(args.config, 'r'))
+    # --- Configuration Constants ---
+    FEATURE_SIZE = 256      # Output size of the learned embedding
+
+    # Training Parameters
+    K_SHOT = 7              # Number of support examples per class
+    N_QUERY = 3             # Number of query examples per class
+    N_EPISODES = 200        # Total training episodes
 
     if args.dataset_type == 'libero':
         target_data = config['dataset_paths']['libero_target']

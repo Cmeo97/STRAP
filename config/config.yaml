@@ -33,8 +33,8 @@ evaluation_paths:
 # Benchmark evaluation configuration
 benchmarks:
   - libero
-  - nuscene
-  - droid
+  # - nuscene
+  # - droid
 
 methods:
   # - llama
@@ -44,4 +44,5 @@ methods:
   # - shapelet
   # - gemma
   # - qwen
-  - modified_strap
+  # - modified_strap
+  - momentfm

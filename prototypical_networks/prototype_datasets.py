@@ -88,7 +88,7 @@ def time_warp_augmentation(sequence, warp_range=(0.8, 1.2)):
     # 4. Return as (New_L, D)
     return warped_tensor.squeeze(0).permute(1, 0).numpy()
 
-def process_target_data(target_data_file):
+def process_target_data(target_data_file, num_episodes=None):
     """Simulates realistic, variable-length maneuver data."""
     maneuvers = {}
     class_names ={}
@@ -106,6 +106,9 @@ def process_target_data(target_data_file):
                 all_data = concat_obs_group(obs, feature_keys=['cartesian_positions', 'gripper_states', 'joint_states'])
             else:
                 raise ValueError("Unknown dataset structure or missing expected keys.")
+            
+            if num_episodes is not None:
+                all_data = all_data[:num_episodes]
             # Convert to list of 2D arrays for sampling
             maneuvers[i] = [all_data[j] for j in range(all_data.shape[0])]
             class_names[i] = task
