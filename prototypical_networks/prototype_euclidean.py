@@ -324,6 +324,7 @@ def retrieve_maneuvers(encoder: SequenceEncoder, maneuver_data: Dict[int, List[n
             episode_key = episode_names[class_id]
             episode = results.create_group(episode_key)
             episode_results = []
+            retrieval_times = []
             
             print(f"\nSearching for {episode_key}...")
             for offline_file in tqdm(offline_data_list, desc=f"Retrieving data for {episode_key}"):
@@ -331,6 +332,7 @@ def retrieve_maneuvers(encoder: SequenceEncoder, maneuver_data: Dict[int, List[n
                 
                 for demo_key, demo_data in test_scenes.items():
                     L, D = demo_data.shape
+                    start_time = time.time()
                     
                     # Skip if demo is shorter than window
                     if L < window_size:
@@ -368,7 +370,9 @@ def retrieve_maneuvers(encoder: SequenceEncoder, maneuver_data: Dict[int, List[n
                                 'demo_key': demo_key,
                                 'offline_file': offline_file
                             })
+                    retrieval_times.append(time.time() - start_time)
             
+            print(f"Average retrieval time: {np.mean(retrieval_times):.10f} seconds")
             # 3. Process and save top K results
             processed_results = process_retrieval_results(episode_results, top_k=TOP_K)
             for match_key, data in processed_results.items():

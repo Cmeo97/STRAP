@@ -6,7 +6,6 @@ dataset_paths:
   nuscene_offline: "data/nuscene/*.hdf5"
   droid_target: "data/target_data/droid_target_dataset.hdf5"
   droid_offline: "data/droid/*.hdf5"
-  modified_strap_target: "data/target_data/modified_strap_target_data.hdf5"
 
 prototype_ckpt_paths:
   libero: "checkpoints/libero_prototype_model.pth"
@@ -22,13 +21,11 @@ retrieval_paths:
   libero: "data/retrieval_results/libero"
   nuscene: "data/retrieval_results/nuscene"
   droid: "data/retrieval_results/droid"
-  modified_strap: "data/retrieval_results/libero"
 
 evaluation_paths:
   libero: "data/evaluation_results/libero"
   nuscene: "data/evaluation_results/nuscene"
   droid: "data/evaluation_results/droid"
-  modified_strap: "data/evaluation_results/modified_strap"
 
 # Benchmark evaluation configuration
 benchmarks:
@@ -37,12 +34,11 @@ benchmarks:
   # - droid
 
 methods:
-  # - llama
-  # - prototype
-  # - dtaidistance
-  # - stumpy
-  # - shapelet
-  # - gemma
-  # - qwen
-  # - modified_strap
+  - llama
+  - prototype
+  - dtaidistance
+  - stumpy
+  - shapelet
+  - gemma
+  - qwen
   - momentfm
