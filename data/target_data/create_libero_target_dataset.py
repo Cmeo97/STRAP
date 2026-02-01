@@ -134,9 +134,10 @@ def extract_data_segment(data, start_idx, end_idx):
     gripper_states = data['obs/gripper_states'][:][start_idx:end_idx]
     joint_states = data['obs/joint_states'][:][start_idx:end_idx]
     ee_pos = data['obs/ee_pos'][:][start_idx:end_idx]
+    images = data['obs/agentview_rgb'][:][start_idx:end_idx]
     robot_states = data['robot_states'][:][start_idx:end_idx]
 
-    return actions, gripper_states, joint_states, ee_pos, robot_states
+    return actions, gripper_states, joint_states, ee_pos, images, robot_states
 
 def resize_to_mean_length(task_data_list):
     """
@@ -179,6 +180,7 @@ def create_target_data(output_file):
                 'gripper_states': [],
                 'joint_states': [],
                 'ee_pos': [],
+                'images': [],
                 'robot_states': []
             }
             f.create_group(task)
@@ -187,12 +189,13 @@ def create_target_data(output_file):
                     for demos in target_data_dict[task]['sources'][source_file]:
                         demo_name, start, end = demos
                         data = source['data'][demo_name]
-                        actions, gripper_states, joint_states, ee_pos, robot_states = extract_data_segment(data, start, end)
+                        actions, gripper_states, joint_states, ee_pos, images, robot_states = extract_data_segment(data, start, end)
                         
                         task_data['actions'].append(actions)
                         task_data['gripper_states'].append(gripper_states)
                         task_data['joint_states'].append(joint_states)
                         task_data['ee_pos'].append(ee_pos)
+                        task_data['images'].append(images)
                         task_data['robot_states'].append(robot_states)
             print(f"Task: {task}, Segments Collected: {len(task_data['actions'])}")
             print(f"Mean sequence length: {np.mean([len(a) for a in task_data['actions']])}")
@@ -202,6 +205,7 @@ def create_target_data(output_file):
             f[task].create_dataset('obs/gripper_states', data=resize_to_mean_length(task_data['gripper_states']))
             f[task].create_dataset('obs/joint_states', data=resize_to_mean_length(task_data['joint_states']))
             f[task].create_dataset('obs/ee_pos', data=resize_to_mean_length(task_data['ee_pos']))
+            #f[task].create_dataset('obs/agentview_rgb', data=task_data['images'])
             f[task].create_dataset('robot_states', data=resize_to_mean_length(task_data['robot_states']))
 
 if __name__ == "__main__":
